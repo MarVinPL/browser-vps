@@ -556,16 +556,24 @@ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
                         "SELECT id,hash,expires,pending_uid,issued_seconds "
                         "FROM invitations WHERE hash=?", (digest,)
                     ).fetchone()
-                if row and row[3] is not None:
+                # Authenticate a Mini App locator before disclosing any row state.
+                # A consumed invite has hash=NULL, so its old locator is deliberately
+                # indistinguishable from an invalid one.
+                locator_valid = (
+                    invite_id is None
+                    or bool(row and row[1] and miniapp_invite_locator_matches(
+                        invite_id, token, row[1], invite_tag))
+                )
+                if invite_id is not None and not locator_valid:
+                    result = "invalid"
+                elif row and row[3] is not None:
                     result = "already_pending"
                     error = "⏳ To zaproszenie zostało już zgłoszone. Poczekaj na decyzję właściciela."
                 elif row and row[2] and row[2] < now:
                     result = "expired"
                     error = "⌛ Zaproszenie wygasło. Poproś właściciela o nowe."
                 elif (row and row[1] and row[2] >= now
-                      and (miniapp_invite_locator_matches(
-                               invite_id, token, row[1], invite_tag)
-                           if invite_id is not None
+                      and (locator_valid if invite_id is not None
                            else secrets.compare_digest(row[1], digest))):
                     nonce = secrets.token_urlsafe(12)
                     username = sender.get("username", "")
@@ -596,7 +604,8 @@ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
                 "🚨 NOWE ZGŁOSZENIE — WYMAGA TWOJEJ WERYFIKACJI!\n\n" +
                 ("✅ Użytkownik potwierdził konto przez Telegram Mini App.\n"
                  if source == "Mini App" else "✅ Użytkownik przesłał kod przez /join_admin.\n") +
-                "🆔 Telegram ID: " + str(uid) + "\n\n"
+                "🆔 Telegram ID: " + str(uid) + "\n"
+                "👤 Nazwa: " + name + "\n\n"
                 "⏳ Czeka na Twoją decyzję. Samo zgłoszenie nie nadaje dostępu.\n"
                 "Na zatwierdzenie: " +
                 (duration_label(row[4]) if row[4] is not None
@@ -757,7 +766,7 @@ def handle(token, owner, update, request):
             ident=con.execute("SELECT last_insert_rowid()").fetchone()[0]
             con.execute("UPDATE invitations SET created_at=?,issued_seconds=? WHERE id=?",(now,ttl,ident))
             audit(con,ident,"created",owner)
-        send(request,token,owner,invitation_message(code,now+ttl,ttl,ident,False,miniapp_invite_url(request,token,ident,new)))
+        send(request,token,owner,invitation_message(code,now+ttl,ttl,ident,False,miniapp_invite_url(request,token,ident,code)))
     elif action=="/cancel_invite":
         parts=raw.split()
         if len(parts)!=2 or not parts[1].isdecimal():
