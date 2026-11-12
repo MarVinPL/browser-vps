@@ -1,0 +1,2213 @@
+From aa3541e975d7ff3ea21c61aed7fc9dac29e6bea2 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:16:54 +0100
+Subject: [PATCH 01/30] feat(issue516): port verified Mini App invite flow onto
+ current main
+
+---
+ deploy/telegram/runtime_files.txt | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/deploy/telegram/runtime_files.txt b/deploy/telegram/runtime_files.txt
+index 956c1120..0d2e074b 100644
+--- a/deploy/telegram/runtime_files.txt
++++ b/deploy/telegram/runtime_files.txt
+@@ -14,5 +14,6 @@ status.py
+ status_export.py
+ task_session_menu.py
+ telegram_clear.py
++webapp_init_data.py
+ telegram_photo_probe.py
+ telegram_state_store.py
+
+From e9578dd26878724be90f3d9b526bf47e0c931387 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:16:58 +0100
+Subject: [PATCH 02/30] feat(issue516): port verified Mini App invite flow onto
+ current main
+
+---
+ deploy/telegram_static_identity.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/deploy/telegram_static_identity.py b/deploy/telegram_static_identity.py
+index 53f5e091..f742e04a 100644
+--- a/deploy/telegram_static_identity.py
++++ b/deploy/telegram_static_identity.py
+@@ -41,7 +41,7 @@
+     "browser-vps-telegram-state",
+ }
+ OFFLINE = (
+-    "bot.py", "coadmin.py", "coadmin_pg_connection.py", "telegram_state_store.py",
++    "bot.py", "coadmin.py", "coadmin_pg_connection.py", "telegram_state_store.py", "webapp_init_data.py",
+ )
+ # Filenames come from the current live state, NOT an outdated sqlite-only
+ # migration manifest. Preserve all existing private files; unknowns STOP.
+
+From 9c7e04c4fda07933c214a5f72dab63859988cb22 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:17:54 +0100
+Subject: [PATCH 03/30] docs(issue516): add Mini App release gate
+
+---
+ docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md b/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md
+index cab06417..d65edbfa 100644
+--- a/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md
++++ b/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md
+@@ -12,4 +12,8 @@ Deployment: replace only coadmin.py and add coadmin_pg_connection.py from merged
+ 
+ Rollback safety: before first PG writes, old SQLite can be used when fully quiesced. AFTER first PG mutation, do not restore old SQLite without explicit live-to-SQLite reconciliation, since stale privileges could be re-granted. Fail closed rather than revoking rollback safeguards.
+ 
+-Real two-device Android end-to-end invitations remain mandatory before closing issue #161. A synthetic QA test does not prove the phone workflow.
+\ No newline at end of file
++Real two-device Android end-to-end invitations remain mandatory before closing issue #161. A synthetic QA test does not prove the phone workflow.
++
++## Mini App invitee endpoint — dodatkowy release gate (#516)
++
++Po scaleniu Draft PR #518 (Issue #516) nie wolno wdrażać wyłącznie `bot.py` i `coadmin.py`. Zestaw zgodny musi zawierać także `webapp_init_data.py` oraz zaktualizowany `deploy/telegram/runtime_files.txt`. `deploy/telegram_static_identity.py` wymaga tego modułu jako części kompletnego release. Przed restartem istniejącego pollera/webhooka obowiązkowe są testy offline, QA PostgreSQL, potwierdzenie dokładnego URL Main Mini App w BotFather, jawna konfiguracja `BVP_TELEGRAM_MAIN_MINI_APP_URL`, weryfikacja `getMe.has_main_web_app` i test na dwóch kontach Telegram. Nie tworzyć drugiego procesu bota, nie zmieniać owner-only gate i nie wdrażać tego Draft PR bez odrębnego GO.
+
+From 6f575a4d9f30c7b2eecfa18a83294128fb0fb499 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:17:57 +0100
+Subject: [PATCH 04/30] docs(issue516): add Telegram Mini App identity contract
+
+---
+ docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md | 34 +++++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+ create mode 100644 docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md
+
+diff --git a/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md b/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md
+new file mode 100644
+index 00000000..a62f5220
+--- /dev/null
++++ b/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md
+@@ -0,0 +1,34 @@
++# Telegram Mini App — kontrakt weryfikacji initData (etap L1)
++
++Status: verifier, wspólna operacja zużycia zaproszenia i osobny endpoint Mini App są przygotowane w Draft PR #518. Brak uruchomionych testów CI/E2E i wdrożenia.
++
++## Źródło tożsamości
++
++- Mini App przekazuje backendowi surowe Telegram.WebApp.initData przez HTTPS.
++- initDataUnsafe jest wyłącznie danymi prezentacyjnymi; nigdy nie może stanowić dowodu tożsamości.
++- Backend weryfikuje HMAC-SHA-256 zgodnie z Telegram Web Apps, używając tokenu istniejącego bota pobranego wyłącznie z serwerowego magazynu sekretów.
++- Standardowy UX nie wymaga ręcznego wpisywania Telegram ID, username ani kodu. Link `https://t.me/<bot_username>?startapp=<invite_code>` jest generowany wyłącznie po dwóch bramkach: Bot API `getMe` potwierdza `has_main_web_app=true`, a operator jawnie ustawia `BVP_TELEGRAM_MAIN_MINI_APP_URL=https://148-113-182-137.sslip.io/vps-telegram/mini` po potwierdzeniu dokładnego URL w BotFather. `getMe` potwierdza istnienie Main Mini App, ale nie zwraca jej URL. Telegram przekazuje wtedy startapp jako podpisany `start_param`. Bez tej zmiennej link pozostaje wyłączony i działa dotychczasowa ścieżka `/join_admin KOD`.
++- Po weryfikacji zwracany jest numeryczny Telegram user ID, podpisany auth_date i opcjonalny podpisany start_param. start_param jest ograniczony do składni Telegram (1–512 znaków A-Z/a-z/0-9/_/-); backend może go użyć jako wskazania zaproszenia dopiero po sprawdzeniu go z trwałym rekordem zaproszenia.
++- Backend nie może przyjmować invite ID, Telegram ID ani username z initDataUnsafe lub zwykłego JSON klienta. start_param musi pochodzić z pól objętych zweryfikowanym HMAC.
++
++## Wymagania parsera i walidacji
++
++- Ograniczenie rozmiaru payloadu i liczby pól; odrzucenie duplikatów, niepoprawnego kodowania, brakujących pól i niepoprawnego JSON.
++- Kanoniczny data_check_string: pola posortowane leksykograficznie, po jednej parze key=value na linię, bez hash.
++- Klucz pośredni: HMAC-SHA-256 z kluczem WebAppData i wiadomością równą tokenowi bota; podpis porównywany stałoczasowo.
++- Świeżość auth_date: domyślnie maksymalnie 300 sekund; tolerancja zegara do 30 sekund w przyszłość.
++- Token bota nie może pochodzić z requestu, logów, repozytorium ani klienta.
++
++## Granica odpowiedzialności
++
++Weryfikacja initData jest osobna od operacji zaproszenia. Osobny POST `/mini-join` w `src/telegram/bot.py` przyjmuje wyłącznie surowe initData w nagłówku, wymaga podpisanego start_param i przekazuje zweryfikowany Telegram user ID oraz kod do `coadmin.submit_invitation`. Ta sama funkcja obsługuje teraz `/join_admin KOD`; nie jest konstruowany sztuczny update Bot API. W PostgreSQL istniejący hash zaproszenia jest zużywany atomowo (hash=NULL), z istniejącym limitem prób, pending_uid, terminem decyzji i jednorazowym nonce dla decyzji właściciela. Właściciel dostaje dotychczasowy przycisk approve/reject. Mini App otrzymuje tylko status zgłoszenia; nie dostaje dostępu do owner-only `/mini-api` ani `/mini-photo`.
++
++Nadal nie ma osobnego rekordu przeglądarkowej sesji invitee ani enrollment grantu Passkey; ten etap nie tworzy sesji, nie zatwierdza zaproszenia i nie nadaje uprawnień.
++
++Pozostaje: (1) potwierdzić w BotFather dokładny URL Main Mini App, ustawić jawne `BVP_TELEGRAM_MAIN_MINI_APP_URL` w kontrolowanym środowisku i sprawdzić, że `getMe.has_main_web_app=true`, (2) uruchomić testy jednostkowe i CI oraz wykonać E2E na testowej bazie PostgreSQL, (3) dopiero osobno zaprojektować powiązanie zaakceptowanego principal z sesją i jednorazowym grantem WebAuthn dla #517. Obecne `/mini`, `/mini-api` i `/mini-photo` pozostają owner-only. Telegram potwierdza kontrolę nad kontem Telegram, nie prawną tożsamość człowieka.
++
++## Testy
++
++`tests/test_telegram_webapp_init_data.py` pokrywa HMAC, tampering, obcy token, TTL, future skew, duplikaty, malformed input, Telegram user ID i signed start_param. `tests/test_coadmin_miniapp_join.py` pokrywa wspólne zużycie zaproszenia, replay, rate limit, wygasanie, istniejącego administratora i warunek Main Mini App. Testy nie kontaktują się z Telegramem ani VPS.
++
++Brak GO do produkcji: zmiany są wyłącznie w Draft PR #518. Nie wykonywać deploymentu, nie włączać rejestracji Passkey ani nie zmieniać istniejącego logowania właściciela. Weryfikacja CI i E2E pozostaje niepotwierdzona.
+
+From 3e3c866da9ea19e12e30c1a8064de7b97a049bd6 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:18:04 +0100
+Subject: [PATCH 05/30] feat(issue516): add separate Mini App invitee flow
+
+---
+ src/telegram/bot.py | 68 +++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 66 insertions(+), 2 deletions(-)
+
+diff --git a/src/telegram/bot.py b/src/telegram/bot.py
+index 9974c64a..2ac2f704 100644
+--- a/src/telegram/bot.py
++++ b/src/telegram/bot.py
+@@ -6,9 +6,10 @@
+ """
+ import datetime
+ if __package__:
+-    from . import coadmin, backup_catalog_menu, postgresql_backup_owner, telegram_state_store, task_session_menu, telegram_clear
++    from . import coadmin, backup_catalog_menu, postgresql_backup_owner, telegram_state_store, task_session_menu, telegram_clear, webapp_init_data
+ else:
+     import coadmin
++    import webapp_init_data
+     import backup_catalog_menu
+     import postgresql_backup_owner
+     import telegram_state_store
+@@ -1599,7 +1600,26 @@ def miniapp_authorized(initdata, token, owner_id):
+   }
+  }catch(e){status.textContent="⛔ Brak autoryzacji lub połączenia: "+e.message}
+ }
+-if(!init)status.textContent="Otwórz aplikację z menu bota Telegram.";else {refresh();setInterval(()=>{if(document.visibilityState==="visible")refresh()},30000)}
++async function joinInvite(){
++ status.textContent="🔐 Weryfikuję zaproszenie w Telegramie…";
++ try{
++  const response=await fetch("./mini-join",{method:"POST",
++   headers:{"Content-Type":"application/json","X-Telegram-Init-Data":init},
++   body:"{}"});
++  const data=await response.json();
++  if(!response.ok)throw Error(data.message||("HTTP "+response.status));
++  status.textContent=data.message||"Zgłoszenie zostało przetworzone.";
++  rows.replaceChildren();
++  result.textContent="Ta ścieżka służy wyłącznie do zgłoszenia zaproszenia. Nie daje dostępu do panelu.";
++ }catch(error){
++  status.textContent="⛔ "+(error.message||"Nie udało się zweryfikować zaproszenia.");
++  rows.replaceChildren();
++  result.textContent="Jeśli zaproszenie jest nadal ważne, poproś właściciela o nowy link.";
++ }
++}
++if(!init)status.textContent="Otwórz aplikację z menu bota Telegram.";
++else if(tg?.initDataUnsafe?.start_param)joinInvite();
++else {refresh();setInterval(()=>{if(document.visibilityState==="visible")refresh()},30000)}
+ </script></html>"""
+ 
+ def sync_telegram_commands(token,owner_id):
+@@ -1643,6 +1663,50 @@ def do_GET(self):
+             self.end_headers();self.wfile.write(data)
+         def do_POST(self):
+             nonlocal offset
++            if self.path=="/mini-join":
++                if self.headers.get("Content-Type")!="application/json":
++                    self.send_error(415);return
++                try:
++                    n=int(self.headers.get("Content-Length","0"))
++                    if not 2<=n<=64:raise ValueError()
++                    payload=json.loads(self.rfile.read(n))
++                    if not isinstance(payload,dict) or payload:
++                        raise ValueError()
++                    init=self.headers.get("X-Telegram-Init-Data","")
++                    identity=webapp_init_data.verify_telegram_webapp_init_data(
++                        init,token,now=int(time.time()))
++                    if not identity.start_param:
++                        self.send_error(403);return
++                    result=coadmin.submit_invitation(
++                        identity.telegram_user_id,identity.start_param,{},
++                        owner_id,request,token,now=int(time.time()),
++                        notify_applicant=False,source="Mini App")
++                    messages={
++                        "pending_owner_approval":"✅ Zaproszenie zostało przyjęte. Właściciel otrzymał zgłoszenie. Dostęp zostanie przyznany dopiero po jego zatwierdzeniu.",
++                        "already_admin":"✅ To konto ma już uprawnienia współadministratora.",
++                        "owner":"To jest konto właściciela — zaproszenie nie jest potrzebne.",
++                        "already_pending":"⏳ To zaproszenie zostało już zgłoszone. Oczekuj na decyzję właściciela.",
++                        "rate_limited":"⏳ Przekroczono limit prób. Spróbuj później.",
++                        "expired":"⌛ Zaproszenie wygasło. Poproś właściciela o nowe.",
++                        "invalid_format":"❌ Link zaproszenia jest nieprawidłowy.",
++                        "invalid":"❌ Zaproszenie jest nieprawidłowe lub nieaktualne.",
++                    }
++                    body=json.dumps({"status":result["status"],
++                        "message":messages.get(result["status"],messages["invalid"])}).encode()
++                    self.send_response(200)
++                    self.send_header("Content-Type","application/json; charset=utf-8")
++                    self.send_header("Cache-Control","no-store")
++                    self.send_header("X-Content-Type-Options","nosniff")
++                    self.send_header("Content-Length",str(len(body)))
++                    self.end_headers();self.wfile.write(body)
++                except webapp_init_data.TelegramInitDataError:
++                    self.send_error(403)
++                except (ValueError,TypeError,UnicodeError):
++                    self.send_error(400)
++                except Exception:
++                    print("MINIAPP_INVITEE_SUBMISSION_FAILED",flush=True)
++                    self.send_error(503)
++                return
+             if self.path=="/mini-photo":
+                 init=self.headers.get("X-Telegram-Init-Data","")
+                 if not miniapp_authorized(init,token,owner_id):
+
+From af30f04f05c9c5ebc164a49e424b4da0fdfda2de Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:18:07 +0100
+Subject: [PATCH 06/30] feat(issue516): add separate Mini App invitee flow
+
+---
+ src/telegram/coadmin.py | 210 +++++++++++++++++++++++++++++-----------
+ 1 file changed, 152 insertions(+), 58 deletions(-)
+
+diff --git a/src/telegram/coadmin.py b/src/telegram/coadmin.py
+index 062af78c..4015b310 100644
+--- a/src/telegram/coadmin.py
++++ b/src/telegram/coadmin.py
+@@ -143,15 +143,37 @@ def generate_invite_code():
+     alphabet=string.ascii_letters+string.digits
+     return "".join(secrets.choice(alphabet) for _ in range(32))
+ 
+-def invitation_message(code,expires,seconds,ident=None,regenerated=False):
++def miniapp_invite_url(request, token, code):
++    """Return a startapp link only after explicit confirmation of the Main Mini App URL."""
++    expected_url = "https://148-113-182-137.sslip.io/vps-telegram/mini"
++    if os.environ.get("BVP_TELEGRAM_MAIN_MINI_APP_URL", "").rstrip("/") != expected_url:
++        return None
++    try:
++        me = request(token, "getMe", {})
++    except RuntimeError:
++        return None
++    username = me.get("username") if isinstance(me, dict) else None
++    if (not isinstance(me, dict) or me.get("has_main_web_app") is not True
++            or not isinstance(username, str)
++            or not 5 <= len(username) <= 32
++            or not all(c in string.ascii_letters + string.digits + "_" for c in username)
++            or not isinstance(code, str)
++            or not 1 <= len(code) <= 64
++            or not all(c in string.ascii_letters + string.digits + "_-" for c in code)):
++        return None
++    return "https://t.me/" + username + "?startapp=" + code
++
++
++def invitation_message(code,expires,seconds,ident=None,regenerated=False,miniapp_url=None):
+     title=(f"🔄 Nowy kod dla zaproszenia #{ident}" if regenerated else "🔐 Kod jednorazowy")
+     note="\nPoprzedni kod został unieważniony. Termin ważności bez zmian." if regenerated else ""
+-    return (title+": "+code+time_details(expires,seconds)+note+
++    app_note=("\n\n📱 Otwórz zaproszenie w Telegram Mini App:\n"+miniapp_url
++              if miniapp_url else "")
++    return (title+": "+code+time_details(expires,seconds)+note+app_note+
+         "\n\n📋 Instrukcja dla zapraszanej osoby:"+
+         "\n1. Otwórz Telegram i znajdź bota Browser VPS."+
+-        "\n2. Wejdź w prywatny czat z botem i naciśnij Start, jeśli potrzeba."+
+-        "\n3. Wyślij poniższe polecenie w jednej linii: /join_admin "+code+
+-        "\n4. Poczekaj na decyzję właściciela. Bot powiadomi Cię o zatwierdzeniu albo odrzuceniu."+
++        "\n2. Jeśli link Mini App jest dostępny, otwórz go; w przeciwnym razie wyślij: /join_admin "+code+
++        "\n3. Poczekaj na decyzję właściciela. Bot powiadomi Cię o zatwierdzeniu albo odrzuceniu."+
+         "\n\n⚠️ Sam kod nie daje dostępu. Prześlij go tylko zaufanej osobie.")
+ 
+ def rotate_invite(token,owner,request,ident,now):
+@@ -164,7 +186,7 @@ def rotate_invite(token,owner,request,ident,now):
+         new=generate_invite_code()
+         con.execute("UPDATE invitations SET hash=? WHERE id=?",(hashlib.sha256(new.encode()).hexdigest(),ident))
+         audit(con,ident,"regenerated",owner)
+-    send(request,token,owner,invitation_message(new,row[0],row[2],ident,True))
++    send(request,token,owner,invitation_message(new,row[0],row[2],ident,True,miniapp_invite_url(request,token,new)))
+ 
+ def expiry_time(expires):
+     import datetime, zoneinfo
+@@ -415,6 +437,128 @@ def command_text(update):
+         return None
+     return uid,raw.strip(),sender
+ 
++
++def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
++                      notify_applicant=True, source="Bot API"):
++    """Consume one invitation for a verified Telegram principal.
++
++    This is the shared application operation for Bot API /join_admin and the
++    separately authenticated Mini App endpoint. It accepts an already
++    established Telegram user ID; it never fabricates a Bot API update.
++    """
++    now = int(time.time()) if now is None else now
++    if type(uid) is not int or uid <= 0 or type(owner) is not int or owner <= 0:
++        return {"status": "invalid"}
++    if uid == owner:
++        if notify_applicant:
++            send(request, token, uid, "ℹ️ Jesteś właścicielem — nie potrzebujesz zaproszenia.")
++        return {"status": "owner"}
++    if not isinstance(sender, dict):
++        sender = {}
++    if is_admin(uid, owner):
++        if notify_applicant:
++            send(request, token, uid, "✅ Masz już uprawnienia współadministratora.")
++        return {"status": "already_admin"}
++    if (not isinstance(code, str) or not 10 <= len(code) <= 128
++            or not all(c.isalnum() or c in "_-" for c in code)):
++        if notify_applicant:
++            send(request, token, uid, "❌ Nieprawidłowy format kodu. Sprawdź, czy zaproszenie jest kompletne.")
++        trace("failed_code_attempt", uid=uid, detail="invalid_format")
++        failed_code_alert(request, token, owner, uid, sender, "błędny format")
++        return {"status": "invalid_format"}
++
++    accepted = False
++    result = "invalid"
++    error = "❌ Nieprawidłowe lub nieaktualne zaproszenie. Poproś właściciela o nowy link."
++    with connect() as con:
++        con.execute("BEGIN IMMEDIATE")
++        # Recheck membership inside the same transaction as invite consumption.
++        if con.execute("SELECT 1 FROM members WHERE uid=?", (uid,)).fetchone():
++            result = "already_admin"
++        else:
++            attempt = con.execute(
++                "SELECT count,started FROM attempts WHERE uid=?", (uid,)
++            ).fetchone()
++            if attempt and now - attempt[1] < TTL and attempt[0] >= 5:
++                result = "rate_limited"
++                error = "⏳ Przekroczono limit prób (5 na 10 minut). Spróbuj później."
++            else:
++                count = attempt[0] + 1 if attempt and now - attempt[1] < TTL else 1
++                start = attempt[1] if attempt and now - attempt[1] < TTL else now
++                con.execute("INSERT OR REPLACE INTO attempts VALUES(?,?,?)", (uid, count, start))
++                digest = hashlib.sha256(code.encode()).hexdigest()
++                row = con.execute(
++                    "SELECT id,hash,expires,pending_uid,issued_seconds "
++                    "FROM invitations WHERE hash=?", (digest,)
++                ).fetchone()
++                if row and row[3] is not None:
++                    result = "already_pending"
++                    error = "⏳ To zaproszenie zostało już zgłoszone. Poczekaj na decyzję właściciela."
++                elif row and row[2] and row[2] < now:
++                    result = "expired"
++                    error = "⌛ Zaproszenie wygasło. Poproś właściciela o nowe."
++                elif (row and row[1] and row[2] >= now
++                      and secrets.compare_digest(row[1], digest)):
++                    nonce = secrets.token_urlsafe(12)
++                    username = sender.get("username", "")
++                    name = ("@" + username if isinstance(username, str)
++                            and len(username) < 64
++                            and username.replace("_", "").isalnum()
++                            else ("Mini App (Telegram)" if source == "Mini App" else "brak nazwy"))
++                    consumed = con.execute(
++                        "UPDATE invitations SET hash=NULL,pending_uid=?,pending_name=?,"
++                        "pending_until=?,nonce=? WHERE id=? AND hash=? AND pending_uid IS NULL",
++                        (uid, name, now + (row[4] if row[4] is not None
++                                           else max(0, row[2] - now)),
++                         nonce, row[0], digest),
++                    )
++                    if consumed.rowcount == 1:
++                        accepted = True
++                        result = "pending_owner_approval"
++                        trace("join_accepted", row[0], uid)
++
++    if accepted:
++        # Preserve existing ordering: owner alert first, then applicant notice.
++        trace("owner_alert_attempt", row[0], uid)
++        try:
++            decision_until = now + (row[4] if row[4] is not None
++                                    else max(0, row[2] - now))
++            send(
++                request, token, owner,
++                "🚨 NOWE ZGŁOSZENIE — WYMAGA TWOJEJ WERYFIKACJI!\n\n" +
++                ("✅ Użytkownik potwierdził konto przez Telegram Mini App.\n"
++                 if source == "Mini App" else "✅ Użytkownik przesłał kod przez /join_admin.\n") +
++                "🆔 Telegram ID: " + str(uid) + "\n\n"
++                "⏳ Czeka na Twoją decyzję. Samo zgłoszenie nie nadaje dostępu.\n"
++                "Na zatwierdzenie: " +
++                (duration_label(row[4]) if row[4] is not None
++                 else "według dotychczasowego terminu") +
++                "\nTermin decyzji: " + expiry_time(decision_until) +
++                "\nDane kodu:" + time_details(row[2], row[4]) +
++                "\nMożesz też użyć /pending_admins.",
++                [[{"text": "✅ Zatwierdź", "callback_data": "admin:approve:" + nonce},
++                  {"text": "❌ Odrzuć", "callback_data": "admin:reject:" + nonce}]],
++            )
++        except Exception:
++            trace("owner_alert_failed", row[0], uid)
++            raise
++        trace("owner_alert_sent", row[0], uid)
++        if notify_applicant:
++            send(request, token, uid,
++                 "✅ Zaproszenie przyjęte. Właściciel otrzymał zgłoszenie. "
++                 "Dostęp zostanie nadany dopiero po jego zatwierdzeniu.\n"
++                 "Termin decyzji: " + expiry_time(decision_until))
++    else:
++        if notify_applicant:
++            send(request, token, uid, error)
++        if result not in ("already_admin", "owner"):
++            trace("join_rejected", uid=uid, detail=(
++                "rate_limited" if result == "rate_limited"
++                else "expired" if result == "expired" else "invalid"))
++            failed_code_alert(request, token, owner, uid, sender,
++                              "odrzucona próba weryfikacji zaproszenia")
++    return {"status": result}
++
+ def handle(token, owner, update, request):
+     """Returns True if an invitation-related command/callback was handled."""
+     if not isinstance(update,dict):
+@@ -545,7 +689,7 @@ def handle(token, owner, update, request):
+             ident=con.execute("SELECT last_insert_rowid()").fetchone()[0]
+             con.execute("UPDATE invitations SET created_at=?,issued_seconds=? WHERE id=?",(now,ttl,ident))
+             audit(con,ident,"created",owner)
+-        send(request,token,owner,invitation_message(code,now+ttl,ttl,ident))
++        send(request,token,owner,invitation_message(code,now+ttl,ttl,ident,False,miniapp_invite_url(request,token,code)))
+     elif action=="/cancel_invite":
+         parts=raw.split()
+         if len(parts)!=2 or not parts[1].isdecimal():
+@@ -565,57 +709,7 @@ def handle(token, owner, update, request):
+             send(request,token,uid,"ℹ️ Użycie: /join_admin KOD\nWklej cały kod otrzymany od właściciela.")
+             failed_code_alert(request,token,owner,uid,sender,"brak kodu")
+             return True
+-        code=parts[1]
+-        if uid==owner:
+-            send(request,token,uid,"ℹ️ Jesteś właścicielem — nie potrzebujesz zaproszenia.")
+-            return True
+-        if is_admin(uid,owner):
+-            send(request,token,uid,"✅ Masz już uprawnienia współadministratora.")
+-            return True
+-        if not (10<=len(code)<=128) or not all(c.isalnum() or c in "_-" for c in code):
+-            send(request,token,uid,"❌ Nieprawidłowy format kodu. Sprawdź, czy wkleiłeś go w całości.")
+-            trace("failed_code_attempt",uid=uid,detail="invalid_format")
+-            failed_code_alert(request,token,owner,uid,sender,"błędny format")
+-            return True
+-        accepted=False
+-        error="❌ Nieprawidłowy lub nieaktualny kod. Poproś właściciela o nowe zaproszenie."
+-        with connect() as con:
+-            con.execute("BEGIN IMMEDIATE")
+-            attempt=con.execute("SELECT count,started FROM attempts WHERE uid=?",(uid,)).fetchone()
+-            if attempt and now-attempt[1]<TTL and attempt[0]>=5:
+-                error="⏳ Przekroczono limit prób (5 na 10 minut). Spróbuj później."
+-            else:
+-                count=attempt[0]+1 if attempt and now-attempt[1]<TTL else 1
+-                start=attempt[1] if attempt and now-attempt[1]<TTL else now
+-                con.execute("INSERT OR REPLACE INTO attempts VALUES(?,?,?)",(uid,count,start))
+-                row=con.execute("SELECT id,hash,expires,pending_uid,issued_seconds FROM invitations WHERE hash=?",(hashlib.sha256(code.encode()).hexdigest(),)).fetchone()
+-                if row and row[3] is not None:
+-                    error="⏳ Zaproszenie zostało już zgłoszone do zatwierdzenia. Poproś właściciela o decyzję lub nowe zaproszenie."
+-                elif row and row[2] and row[2]<now:
+-                    error="⌛ Kod zaproszenia wygasł. Poproś właściciela o nowy."
+-                elif row and row[1] and row[2]>=now and secrets.compare_digest(row[1],hashlib.sha256(code.encode()).hexdigest()):
+-                    nonce=secrets.token_urlsafe(12)
+-                    username=sender.get("username","")
+-                    name=("@"+username if isinstance(username,str) and len(username)<64 and username.replace("_","").isalnum() else "brak nazwy")
+-                    con.execute("UPDATE invitations SET hash=NULL, pending_uid=?,pending_name=?,pending_until=?,nonce=? WHERE id=?",(uid,name,now+(row[4] if row[4] is not None else max(0,row[2]-now)),nonce,row[0]))
+-                    accepted=True
+-                    trace("join_accepted",row[0],uid)
+-        if accepted:
+-            # Send the owner alert first: if delivery fails, Telegram can retry
+-            # the update and the owner can still use /pending_admins.
+-            trace("owner_alert_attempt",row[0],uid)
+-            try:
+-                send(request,token,owner,"🚨 NOWE ZGŁOSZENIE — WYMAGA TWOJEJ WERYFIKACJI!\n\n✅ Użytkownik wpisał poprawny kod zaproszenia.\n👤 Nazwa: "+name+"\n🆔 Telegram ID: "+str(uid)+"\n\n⏳ Czeka na Twoją decyzję. Sprawdź tożsamość tej osoby przed zatwierdzeniem.\nNa zatwierdzenie: "+(duration_label(row[4]) if row[4] is not None else "według dotychczasowego terminu")+"\nTermin decyzji: "+expiry_time(now+(row[4] if row[4] is not None else max(0,row[2]-now)))+"\nDane kodu:"+time_details(row[2],row[4])+"\nMożesz też użyć /pending_admins.",[
+-                  [{"text":"✅ Zatwierdź","callback_data":"admin:approve:"+nonce},{"text":"❌ Odrzuć","callback_data":"admin:reject:"+nonce}]])
+-            except Exception:
+-                trace("owner_alert_failed",row[0],uid)
+-                raise
+-            trace("owner_alert_sent",row[0],uid)
+-            send(request,token,uid,"✅ Kod przyjęty. Właściciel otrzymał alert i może zweryfikować Twoje zgłoszenie. Dostęp zostanie nadany dopiero po zatwierdzeniu.\nTermin decyzji: "+expiry_time(now+(row[4] if row[4] is not None else max(0,row[2]-now))))
+-        else:
+-            send(request,token,uid,error)
+-            trace("join_rejected",uid=uid,detail=("rate_limited" if "limit prób" in error else "expired" if "wygasł" in error else "invalid"))
+-            failed_code_alert(request,token,owner,uid,sender,"odrzucona próba weryfikacji kodu")
++        submit_invitation(uid,parts[1],sender,owner,request,token,now=now)
+     elif action=="/admins":
+         show_admins(request, token, owner, uid, sender, raw)
+     elif action=="/remove_admin":
+
+From 5ac7c6f600e3cfaabb15d7d55ff5b86674408b87 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:18:14 +0100
+Subject: [PATCH 07/30] test(issue516): add Telegram Mini App identity and
+ invitation tests
+
+---
+ src/telegram/webapp_init_data.py | 131 +++++++++++++++++++++++++++++++
+ 1 file changed, 131 insertions(+)
+ create mode 100644 src/telegram/webapp_init_data.py
+
+diff --git a/src/telegram/webapp_init_data.py b/src/telegram/webapp_init_data.py
+new file mode 100644
+index 00000000..b379863d
+--- /dev/null
++++ b/src/telegram/webapp_init_data.py
+@@ -0,0 +1,131 @@
++"""Offline-verifiable Telegram Mini App initData authentication primitive.
++
++Verifies Telegram's HMAC signature using a server-held bot token. It does not
++create sessions, consume invite challenges, grant roles, or call Telegram.
++Callers must bind the returned principal to a server-side invite and one-use
++challenge before any authorization decision.
++"""
++from __future__ import annotations
++
++from dataclasses import dataclass
++import hashlib
++import hmac
++import json
++import re
++from urllib.parse import parse_qsl
++
++
++class TelegramInitDataError(ValueError):
++    """Generic failure; never include initData or the bot token in the message."""
++
++
++@dataclass(frozen=True)
++class TelegramWebAppIdentity:
++    telegram_user_id: int
++    auth_date: int
++    start_param: str | None = None
++
++
++def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
++    result: dict[str, object] = {}
++    for key, value in pairs:
++        if key in result:
++            raise ValueError("duplicate JSON key")
++        result[key] = value
++    return result
++
++
++def _reject_json_constant(value: str) -> None:
++    raise ValueError("invalid JSON constant")
++
++
++def verify_telegram_webapp_init_data(
++    raw_init_data: str,
++    bot_token: str,
++    *,
++    now: int,
++    max_age_seconds: int = 300,
++    future_skew_seconds: int = 30,
++) -> TelegramWebAppIdentity:
++    """Verify raw Telegram.WebApp.initData and return the signed user ID and optional signed start_param.
++
++    The bot token must come from a server-side secret store, never a request.
++    The injected Unix timestamp makes freshness checks deterministic.
++    """
++    if (
++        not isinstance(raw_init_data, str)
++        or not raw_init_data
++        or len(raw_init_data) > 16_384
++        or not isinstance(bot_token, str)
++        or not bot_token
++        or type(now) is not int
++        or now < 0
++        or type(max_age_seconds) is not int
++        or not 1 <= max_age_seconds <= 600
++        or type(future_skew_seconds) is not int
++        or not 0 <= future_skew_seconds <= 60
++    ):
++        raise TelegramInitDataError()
++
++    try:
++        fields = parse_qsl(
++            raw_init_data,
++            keep_blank_values=True,
++            strict_parsing=True,
++            max_num_fields=32,
++            encoding="utf-8",
++            errors="strict",
++        )
++        values: dict[str, str] = {}
++        for key, value in fields:
++            if not key or key in values:
++                raise ValueError("duplicate or empty field")
++            values[key] = value
++
++        supplied_hash = values.pop("hash")
++        auth_date_text = values["auth_date"]
++        user_text = values["user"]
++        start_param = values.get("start_param")
++        if start_param is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,512}", start_param):
++            raise ValueError("invalid start_param")
++        if not re.fullmatch(r"[0-9a-f]{64}", supplied_hash):
++            raise ValueError("invalid hash")
++        if not re.fullmatch(r"[0-9]{1,12}", auth_date_text):
++            raise ValueError("invalid auth_date")
++
++        auth_date = int(auth_date_text)
++        if auth_date > now + future_skew_seconds:
++            raise ValueError("future auth_date")
++        if now - auth_date > max_age_seconds:
++            raise ValueError("expired auth_date")
++
++        data_check_string = "\n".join(
++            f"{key}={value}" for key, value in sorted(values.items())
++        )
++        secret_key = hmac.new(
++            b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256
++        ).digest()
++        expected_hash = hmac.new(
++            secret_key, data_check_string.encode("utf-8"), hashlib.sha256
++        ).hexdigest()
++        if not hmac.compare_digest(expected_hash, supplied_hash):
++            raise ValueError("signature mismatch")
++
++        user = json.loads(
++            user_text,
++            object_pairs_hook=_unique_json_object,
++            parse_constant=_reject_json_constant,
++        )
++        if not isinstance(user, dict):
++            raise ValueError("invalid user")
++        user_id = user.get("id")
++        if type(user_id) is not int or user_id <= 0:
++            raise ValueError("invalid user id")
++
++        return TelegramWebAppIdentity(
++            telegram_user_id=user_id,
++            auth_date=auth_date,
++            start_param=start_param,
++        )
++    except (KeyError, TypeError, ValueError, UnicodeError, RecursionError):
++        raise TelegramInitDataError() from None
+
+From 2b3d91976a07abd5892e15b4d93031614d3c092a Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:18:17 +0100
+Subject: [PATCH 08/30] test(issue516): add Telegram Mini App identity and
+ invitation tests
+
+---
+ tests/test_coadmin_miniapp_join.py | 180 +++++++++++++++++++++++++++++
+ 1 file changed, 180 insertions(+)
+ create mode 100644 tests/test_coadmin_miniapp_join.py
+
+diff --git a/tests/test_coadmin_miniapp_join.py b/tests/test_coadmin_miniapp_join.py
+new file mode 100644
+index 00000000..49152351
+--- /dev/null
++++ b/tests/test_coadmin_miniapp_join.py
+@@ -0,0 +1,180 @@
++"""Shared invitation-consumption tests for Bot API and Mini App entry points."""
++import hashlib
++import sqlite3
++import unittest
++from unittest.mock import patch
++
++from src.telegram import coadmin
++
++
++OWNER = 123
++USER = 456
++CODE = "SyntheticInviteCode1234567890"
++NOW = 1_800_000_000
++
++
++class MiniAppInviteSubmissionTests(unittest.TestCase):
++    def setUp(self):
++        self.db = sqlite3.connect(":memory:")
++        self.db.executescript("""
++            CREATE TABLE members(uid INTEGER PRIMARY KEY, joined_at INTEGER);
++            CREATE TABLE attempts(uid INTEGER PRIMARY KEY, count INTEGER, started INTEGER);
++            CREATE TABLE invitations(id INTEGER PRIMARY KEY, hash TEXT UNIQUE,
++                expires INTEGER, pending_uid INTEGER, pending_name TEXT,
++                pending_until INTEGER, nonce TEXT UNIQUE, created_at INTEGER,
++                issued_seconds INTEGER);
++            CREATE TABLE denied_alerts(uid INTEGER PRIMARY KEY, last_at INTEGER);
++            INSERT INTO invitations VALUES(
++                7, '"""+hashlib.sha256(CODE.encode()).hexdigest()+"""',
++                1800000600, NULL, NULL, NULL, NULL, 1799999900, 600
++            );
++        """)
++        self.calls = []
++        self.patches = [
++            patch.object(coadmin, "connect", return_value=self.db),
++            patch.object(coadmin, "trace"),
++            patch.object(coadmin, "failed_code_alert"),
++            patch.object(coadmin.time, "time", return_value=NOW),
++        ]
++        for item in self.patches:
++            item.start()
++            self.addCleanup(item.stop)
++
++    def tearDown(self):
++        self.db.close()
++
++    def request(self, token, method, payload):
++        self.assertEqual(token, "fixture-token")
++        self.calls.append((method, payload))
++        return True
++
++    def submit(self, code=CODE, *, notify_applicant=False, uid=USER):
++        return coadmin.submit_invitation(
++            uid, code, {}, OWNER, self.request, "fixture-token",
++            now=NOW, notify_applicant=notify_applicant, source="Mini App",
++        )
++
++    def test_miniapp_uses_same_single_use_invite_and_owner_approval(self):
++        result = self.submit()
++        self.assertEqual(result, {"status": "pending_owner_approval"})
++        row = self.db.execute(
++            "SELECT hash,pending_uid,pending_name,pending_until,nonce "
++            "FROM invitations WHERE id=7"
++        ).fetchone()
++        self.assertIsNone(row[0])
++        self.assertEqual(row[1], USER)
++        self.assertEqual(row[2], "Mini App (Telegram)")
++        self.assertEqual(row[3], NOW + 600)
++        self.assertTrue(row[4])
++        owner_alerts = [
++            p for method, p in self.calls
++            if method == "sendMessage" and p["chat_id"] == OWNER
++        ]
++        self.assertEqual(len(owner_alerts), 1)
++        self.assertIn("Telegram Mini App", owner_alerts[0]["text"])
++        self.assertIn("admin:approve:", str(owner_alerts[0]["reply_markup"]))
++        self.assertFalse(any(
++            method == "sendMessage" and p["chat_id"] == USER
++            for method, p in self.calls
++        ))
++
++    def test_replay_cannot_consume_or_create_second_pending_request(self):
++        first = self.submit()
++        self.calls.clear()
++        second = self.submit()
++        self.assertEqual(first["status"], "pending_owner_approval")
++        self.assertEqual(second["status"], "invalid")
++        self.assertFalse(any(
++            method == "sendMessage" and p["chat_id"] == OWNER
++            for method, p in self.calls
++        ))
++        self.assertEqual(
++            self.db.execute("SELECT COUNT(*) FROM invitations WHERE pending_uid=?", (USER,)).fetchone()[0],
++            1,
++        )
++
++    def test_legacy_bot_api_path_can_still_notify_applicant(self):
++        result = self.submit(notify_applicant=True)
++        self.assertEqual(result["status"], "pending_owner_approval")
++        destinations = [
++            p["chat_id"] for method, p in self.calls if method == "sendMessage"
++        ]
++        self.assertEqual(destinations, [OWNER, USER])
++
++    def test_expired_invitation_is_rejected(self):
++        self.db.execute("UPDATE invitations SET expires=? WHERE id=7", (NOW - 1,))
++        result = self.submit()
++        self.assertEqual(result["status"], "expired")
++        self.assertIsNone(
++            self.db.execute("SELECT pending_uid FROM invitations WHERE id=7").fetchone()[0]
++        )
++
++    def test_rate_limit_is_shared_by_verified_telegram_user(self):
++        self.db.execute("INSERT INTO attempts VALUES(?,?,?)", (USER, 5, NOW - 10))
++        result = self.submit()
++        self.assertEqual(result["status"], "rate_limited")
++        self.assertIsNone(
++            self.db.execute("SELECT pending_uid FROM invitations WHERE id=7").fetchone()[0]
++        )
++
++    def test_existing_member_does_not_consume_invitation(self):
++        self.db.execute("INSERT INTO members VALUES(?,?)", (USER, NOW - 10))
++        result = self.submit()
++        self.assertEqual(result["status"], "already_admin")
++        self.assertIsNotNone(
++            self.db.execute("SELECT hash FROM invitations WHERE id=7").fetchone()[0]
++        )
++
++    def test_owner_cannot_use_an_invitation(self):
++        result = self.submit(uid=OWNER)
++        self.assertEqual(result["status"], "owner")
++        self.assertIsNotNone(
++            self.db.execute("SELECT hash FROM invitations WHERE id=7").fetchone()[0]
++        )
++
++
++    def test_deep_link_is_generated_only_when_main_mini_app_is_configured(self):
++        def configured(token, method, payload):
++            self.assertEqual((token, method, payload), ("fixture-token", "getMe", {}))
++            return {"username": "BrowserVpsBot", "has_main_web_app": True}
++        with patch.dict(coadmin.os.environ, {
++            "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
++        }):
++            self.assertEqual(
++                coadmin.miniapp_invite_url(configured, "fixture-token", CODE),
++                "https://t.me/BrowserVpsBot?startapp=" + CODE,
++            )
++
++    def test_no_deep_link_when_main_mini_app_is_not_configured(self):
++        def not_configured(token, method, payload):
++            return {"username": "BrowserVpsBot", "has_main_web_app": False}
++        with patch.dict(coadmin.os.environ, {
++            "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
++        }):
++            self.assertIsNone(coadmin.miniapp_invite_url(not_configured, "fixture-token", CODE))
++
++    def test_invalid_bot_username_never_becomes_a_link(self):
++        def invalid_username(token, method, payload):
++            return {"username": "bad/name", "has_main_web_app": True}
++        with patch.dict(coadmin.os.environ, {
++            "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
++        }):
++            self.assertIsNone(coadmin.miniapp_invite_url(invalid_username, "fixture-token", CODE))
++
++
++    def test_link_stays_disabled_until_operator_confirms_exact_main_app_url(self):
++        def configured(token, method, payload):
++            return {"username": "BrowserVpsBot", "has_main_web_app": True}
++        with patch.dict(coadmin.os.environ, {"BVP_TELEGRAM_MAIN_MINI_APP_URL": ""}):
++            self.assertIsNone(coadmin.miniapp_invite_url(configured, "fixture-token", CODE))
++
++    def test_invalid_format_does_not_consume_invitation(self):
++        result = self.submit(code="not valid")
++        self.assertEqual(result["status"], "invalid_format")
++        self.assertIsNotNone(
++            self.db.execute("SELECT hash FROM invitations WHERE id=7").fetchone()[0]
++        )
++
++
++if __name__ == "__main__":
++    unittest.main()
+
+From b4a0b5945bc13f27cc6404983fddd6b53833f529 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:18:19 +0100
+Subject: [PATCH 09/30] test(issue516): add Telegram Mini App identity and
+ invitation tests
+
+---
+ tests/test_telegram_webapp_init_data.py | 148 ++++++++++++++++++++++++
+ 1 file changed, 148 insertions(+)
+ create mode 100644 tests/test_telegram_webapp_init_data.py
+
+diff --git a/tests/test_telegram_webapp_init_data.py b/tests/test_telegram_webapp_init_data.py
+new file mode 100644
+index 00000000..a017f641
+--- /dev/null
++++ b/tests/test_telegram_webapp_init_data.py
+@@ -0,0 +1,148 @@
++"""Offline tests for Telegram Mini App initData HMAC verification."""
++import hashlib
++import hmac
++import json
++import unittest
++from urllib.parse import urlencode
++
++from src.telegram.webapp_init_data import (
++    TelegramInitDataError,
++    verify_telegram_webapp_init_data,
++)
++
++
++TOKEN = "123456:fixture-token-never-used-outside-tests"
++NOW = 1_800_000_000
++
++
++def make_init_data(*, user=None, auth_date=NOW, extra=None, token=TOKEN):
++    fields = {
++        "auth_date": str(auth_date),
++        "user": json.dumps(user or {"id": 123456, "first_name": "Fixture"}),
++    }
++    fields.update(extra or {})
++    check = "\n".join(f"{key}={value}" for key, value in sorted(fields.items()))
++    secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
++    fields["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
++    return urlencode(fields)
++
++
++class TelegramWebAppInitDataTests(unittest.TestCase):
++    def verify(self, raw, **kwargs):
++        return verify_telegram_webapp_init_data(raw, TOKEN, now=NOW, **kwargs)
++
++    def test_valid_data_returns_only_signed_user_id_and_auth_date(self):
++        result = self.verify(make_init_data())
++        self.assertEqual(result.telegram_user_id, 123456)
++        self.assertEqual(result.auth_date, NOW)
++        self.assertEqual(set(result.__dataclass_fields__), {"telegram_user_id", "auth_date", "start_param"})
++        self.assertIsNone(result.start_param)
++
++
++    def test_signed_start_param_is_returned(self):
++        raw = make_init_data(extra={"start_param": "invite_Abc123_-"})
++        self.assertEqual(self.verify(raw).start_param, "invite_Abc123_-")
++
++    def test_tampered_start_param_is_rejected(self):
++        raw = make_init_data(extra={"start_param": "invite_Abc123"})
++        raw = raw.replace("invite_Abc123", "invite_Xbc123")
++        with self.assertRaises(TelegramInitDataError):
++            self.verify(raw)
++
++    def test_invalid_start_param_is_rejected(self):
++        for value in ("", "contains.dot", "x" * 513):
++            with self.subTest(value=value):
++                raw = make_init_data(extra={"start_param": value})
++                with self.assertRaises(TelegramInitDataError):
++                    self.verify(raw)
++
++    def test_tampered_user_is_rejected(self):
++        raw = make_init_data().replace("123456", "654321")
++        with self.assertRaises(TelegramInitDataError):
++            self.verify(raw)
++
++    def test_wrong_bot_token_is_rejected(self):
++        with self.assertRaises(TelegramInitDataError):
++            verify_telegram_webapp_init_data(
++                make_init_data(), "123456:other-token", now=NOW
++            )
++
++    def test_expired_auth_date_is_rejected(self):
++        with self.assertRaises(TelegramInitDataError):
++            self.verify(make_init_data(auth_date=NOW - 301))
++
++    def test_future_auth_date_outside_skew_is_rejected(self):
++        with self.assertRaises(TelegramInitDataError):
++            self.verify(make_init_data(auth_date=NOW + 31))
++
++    def test_future_auth_date_within_skew_is_accepted(self):
++        self.assertEqual(
++            self.verify(make_init_data(auth_date=NOW + 30)).telegram_user_id,
++            123456,
++        )
++
++    def test_duplicate_query_parameter_is_rejected(self):
++        raw = make_init_data() + "&auth_date=" + str(NOW)
++        with self.assertRaises(TelegramInitDataError):
++            self.verify(raw)
++
++    def test_missing_required_field_is_rejected(self):
++        raw = urlencode({"user": json.dumps({"id": 123456}), "hash": "0" * 64})
++        with self.assertRaises(TelegramInitDataError):
++            self.verify(raw)
++
++    def test_malformed_query_is_rejected(self):
++        with self.assertRaises(TelegramInitDataError):
++            self.verify("auth_date")
++
++    def test_invalid_hash_format_is_rejected(self):
++        raw = make_init_data().replace("hash=", "hash=XYZ")
++        with self.assertRaises(TelegramInitDataError):
++            self.verify(raw)
++
++    def test_boolean_user_id_is_rejected(self):
++        with self.assertRaises(TelegramInitDataError):
++            self.verify(make_init_data(user={"id": True}))
++
++    def test_non_positive_user_id_is_rejected(self):
++        for user_id in (0, -1):
++            with self.subTest(user_id=user_id):
++                with self.assertRaises(TelegramInitDataError):
++                    self.verify(make_init_data(user={"id": user_id}))
++
++    def test_duplicate_json_user_key_is_rejected(self):
++        user = '{"id":123456,"id":654321}'
++        raw = make_init_data()
++        fields = {
++            "auth_date": str(NOW),
++            "user": user,
++        }
++        check = "\n".join(f"{key}={value}" for key, value in sorted(fields.items()))
++        secret = hmac.new(b"WebAppData", TOKEN.encode(), hashlib.sha256).digest()
++        fields["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
++        with self.assertRaises(TelegramInitDataError):
++            self.verify(urlencode(fields))
++
++    def test_oversized_payload_is_rejected(self):
++        with self.assertRaises(TelegramInitDataError):
++            self.verify("x" * 16_385)
++
++    def test_invalid_clock_and_policy_values_are_rejected(self):
++        for kwargs in (
++            {"now": True},
++            {"max_age_seconds": 0},
++            {"max_age_seconds": 601},
++            {"future_skew_seconds": -1},
++            {"future_skew_seconds": 61},
++        ):
++            with self.subTest(kwargs=kwargs):
++                params = {"now": NOW}
++                params.update(kwargs)
++                with self.assertRaises(TelegramInitDataError):
++                    verify_telegram_webapp_init_data(
++                        make_init_data(), TOKEN, **params
++                    )
++
++
++if __name__ == "__main__":
++    unittest.main()
+
+From 3b5437a22a6ee50762fd70b3455d8a68b93b04a9 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:24:09 +0100
+Subject: [PATCH 10/30] security(issue516): use signed public invite locator
+ instead of bearer code in URL
+
+---
+ src/telegram/coadmin.py | 83 +++++++++++++++++++++++++++++------------
+ 1 file changed, 60 insertions(+), 23 deletions(-)
+
+diff --git a/src/telegram/coadmin.py b/src/telegram/coadmin.py
+index 4015b310..fbca3118 100644
+--- a/src/telegram/coadmin.py
++++ b/src/telegram/coadmin.py
+@@ -1,5 +1,6 @@
+ """Owner-approved one-time Telegram co-admin invitations."""
+ import hashlib
++import hmac
+ import json
+ import os
+ import pathlib
+@@ -143,11 +144,39 @@ def generate_invite_code():
+     alphabet=string.ascii_letters+string.digits
+     return "".join(secrets.choice(alphabet) for _ in range(32))
+ 
+-def miniapp_invite_url(request, token, code):
++def miniapp_invite_start_param(invite_id, token):
++    """Create a public, integrity-protected invite locator; never put the bearer code in a URL."""
++    if type(invite_id) is not int or not 1 <= invite_id < 2**63:
++        return None
++    if not isinstance(token, str) or not token:
++        return None
++    message = b"bvp-miniapp-invite:v1:" + str(invite_id).encode("ascii")
++    tag = hmac.new(token.encode("utf-8"), message, hashlib.sha256).hexdigest()[:32]
++    return "i1_" + str(invite_id) + "_" + tag
++
++
++def verify_miniapp_invite_start_param(start_param, token):
++    """Resolve a signed public locator to an invite ID; it is not an authorization grant."""
++    if not isinstance(start_param, str) or not isinstance(token, str) or not token:
++        return None
++    match = re.fullmatch(r"i1_([1-9][0-9]{0,18})_([0-9a-f]{32})", start_param)
++    if not match:
++        return None
++    invite_id = int(match.group(1))
++    if invite_id >= 2**63:
++        return None
++    expected = miniapp_invite_start_param(invite_id, token)
++    return invite_id if expected and hmac.compare_digest(expected, start_param) else None
++
++
++def miniapp_invite_url(request, token, invite_id):
+     """Return a startapp link only after explicit confirmation of the Main Mini App URL."""
+     expected_url = "https://148-113-182-137.sslip.io/vps-telegram/mini"
+     if os.environ.get("BVP_TELEGRAM_MAIN_MINI_APP_URL", "").rstrip("/") != expected_url:
+         return None
++    start_param = miniapp_invite_start_param(invite_id, token)
++    if not start_param:
++        return None
+     try:
+         me = request(token, "getMe", {})
+     except RuntimeError:
+@@ -156,12 +185,9 @@ def miniapp_invite_url(request, token, code):
+     if (not isinstance(me, dict) or me.get("has_main_web_app") is not True
+             or not isinstance(username, str)
+             or not 5 <= len(username) <= 32
+-            or not all(c in string.ascii_letters + string.digits + "_" for c in username)
+-            or not isinstance(code, str)
+-            or not 1 <= len(code) <= 64
+-            or not all(c in string.ascii_letters + string.digits + "_-" for c in code)):
++            or not all(c in string.ascii_letters + string.digits + "_" for c in username)):
+         return None
+-    return "https://t.me/" + username + "?startapp=" + code
++    return "https://t.me/" + username + "?startapp=" + start_param
+ 
+ 
+ def invitation_message(code,expires,seconds,ident=None,regenerated=False,miniapp_url=None):
+@@ -186,7 +212,7 @@ def rotate_invite(token,owner,request,ident,now):
+         new=generate_invite_code()
+         con.execute("UPDATE invitations SET hash=? WHERE id=?",(hashlib.sha256(new.encode()).hexdigest(),ident))
+         audit(con,ident,"regenerated",owner)
+-    send(request,token,owner,invitation_message(new,row[0],row[2],ident,True,miniapp_invite_url(request,token,new)))
++    send(request,token,owner,invitation_message(new,row[0],row[2],ident,True,miniapp_invite_url(request,token,ident)))
+ 
+ def expiry_time(expires):
+     import datetime, zoneinfo
+@@ -439,7 +465,7 @@ def command_text(update):
+ 
+ 
+ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
+-                      notify_applicant=True, source="Bot API"):
++                      notify_applicant=True, source="Bot API", invite_id=None):
+     """Consume one invitation for a verified Telegram principal.
+ 
+     This is the shared application operation for Bot API /join_admin and the
+@@ -459,13 +485,19 @@ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
+         if notify_applicant:
+             send(request, token, uid, "✅ Masz już uprawnienia współadministratora.")
+         return {"status": "already_admin"}
+-    if (not isinstance(code, str) or not 10 <= len(code) <= 128
+-            or not all(c.isalnum() or c in "_-" for c in code)):
+-        if notify_applicant:
+-            send(request, token, uid, "❌ Nieprawidłowy format kodu. Sprawdź, czy zaproszenie jest kompletne.")
+-        trace("failed_code_attempt", uid=uid, detail="invalid_format")
+-        failed_code_alert(request, token, owner, uid, sender, "błędny format")
+-        return {"status": "invalid_format"}
++    if invite_id is not None:
++        if type(invite_id) is not int or not 1 <= invite_id < 2**63:
++            return {"status": "invalid"}
++        digest = None
++    else:
++        if (not isinstance(code, str) or not 10 <= len(code) <= 128
++                or not all(c.isalnum() or c in "_-" for c in code)):
++            if notify_applicant:
++                send(request, token, uid, "❌ Nieprawidłowy format kodu. Sprawdź, czy zaproszenie jest kompletne.")
++            trace("failed_code_attempt", uid=uid, detail="invalid_format")
++            failed_code_alert(request, token, owner, uid, sender, "błędny format")
++            return {"status": "invalid_format"}
++        digest = hashlib.sha256(code.encode()).hexdigest()
+ 
+     accepted = False
+     result = "invalid"
+@@ -486,11 +518,16 @@ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
+                 count = attempt[0] + 1 if attempt and now - attempt[1] < TTL else 1
+                 start = attempt[1] if attempt and now - attempt[1] < TTL else now
+                 con.execute("INSERT OR REPLACE INTO attempts VALUES(?,?,?)", (uid, count, start))
+-                digest = hashlib.sha256(code.encode()).hexdigest()
+-                row = con.execute(
+-                    "SELECT id,hash,expires,pending_uid,issued_seconds "
+-                    "FROM invitations WHERE hash=?", (digest,)
+-                ).fetchone()
++                if invite_id is not None:
++                    row = con.execute(
++                        "SELECT id,hash,expires,pending_uid,issued_seconds "
++                        "FROM invitations WHERE id=?", (invite_id,)
++                    ).fetchone()
++                else:
++                    row = con.execute(
++                        "SELECT id,hash,expires,pending_uid,issued_seconds "
++                        "FROM invitations WHERE hash=?", (digest,)
++                    ).fetchone()
+                 if row and row[3] is not None:
+                     result = "already_pending"
+                     error = "⏳ To zaproszenie zostało już zgłoszone. Poczekaj na decyzję właściciela."
+@@ -498,7 +535,7 @@ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
+                     result = "expired"
+                     error = "⌛ Zaproszenie wygasło. Poproś właściciela o nowe."
+                 elif (row and row[1] and row[2] >= now
+-                      and secrets.compare_digest(row[1], digest)):
++                      and (invite_id is not None or secrets.compare_digest(row[1], digest))):
+                     nonce = secrets.token_urlsafe(12)
+                     username = sender.get("username", "")
+                     name = ("@" + username if isinstance(username, str)
+@@ -510,7 +547,7 @@ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
+                         "pending_until=?,nonce=? WHERE id=? AND hash=? AND pending_uid IS NULL",
+                         (uid, name, now + (row[4] if row[4] is not None
+                                            else max(0, row[2] - now)),
+-                         nonce, row[0], digest),
++                         nonce, row[0], row[1]),
+                     )
+                     if consumed.rowcount == 1:
+                         accepted = True
+@@ -689,7 +726,7 @@ def handle(token, owner, update, request):
+             ident=con.execute("SELECT last_insert_rowid()").fetchone()[0]
+             con.execute("UPDATE invitations SET created_at=?,issued_seconds=? WHERE id=?",(now,ttl,ident))
+             audit(con,ident,"created",owner)
+-        send(request,token,owner,invitation_message(code,now+ttl,ttl,ident,False,miniapp_invite_url(request,token,code)))
++        send(request,token,owner,invitation_message(code,now+ttl,ttl,ident,False,miniapp_invite_url(request,token,ident)))
+     elif action=="/cancel_invite":
+         parts=raw.split()
+         if len(parts)!=2 or not parts[1].isdecimal():
+
+From 7f4259973bfa0f746ccbfdf87b67cee70d86b341 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:24:20 +0100
+Subject: [PATCH 11/30] fix(issue516): import strict locator parser
+
+---
+ src/telegram/coadmin.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/telegram/coadmin.py b/src/telegram/coadmin.py
+index fbca3118..d10987f0 100644
+--- a/src/telegram/coadmin.py
++++ b/src/telegram/coadmin.py
+@@ -4,6 +4,7 @@
+ import json
+ import os
+ import pathlib
++import re
+ import secrets
+ import string
+ import sqlite3
+
+From b428bcc94217a0096c608ca36809d54f3b037d04 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:24:23 +0100
+Subject: [PATCH 12/30] security(issue516): resolve signed invite locator
+ server-side
+
+---
+ src/telegram/bot.py | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/telegram/bot.py b/src/telegram/bot.py
+index 2ac2f704..4f3f9c4c 100644
+--- a/src/telegram/bot.py
++++ b/src/telegram/bot.py
+@@ -1675,12 +1675,14 @@ def do_POST(self):
+                     init=self.headers.get("X-Telegram-Init-Data","")
+                     identity=webapp_init_data.verify_telegram_webapp_init_data(
+                         init,token,now=int(time.time()))
+-                    if not identity.start_param:
++                    invite_id=coadmin.verify_miniapp_invite_start_param(
++                        identity.start_param,token)
++                    if invite_id is None:
+                         self.send_error(403);return
+                     result=coadmin.submit_invitation(
+-                        identity.telegram_user_id,identity.start_param,{},
++                        identity.telegram_user_id,None,{},
+                         owner_id,request,token,now=int(time.time()),
+-                        notify_applicant=False,source="Mini App")
++                        notify_applicant=False,source="Mini App",invite_id=invite_id)
+                     messages={
+                         "pending_owner_approval":"✅ Zaproszenie zostało przyjęte. Właściciel otrzymał zgłoszenie. Dostęp zostanie przyznany dopiero po jego zatwierdzeniu.",
+                         "already_admin":"✅ To konto ma już uprawnienia współadministratora.",
+
+From bb031de79dd36637ec71e8e282d1a371f1b75a97 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:24:33 +0100
+Subject: [PATCH 13/30] test(issue516): cover signed public locator and
+ server-side invite resolution
+
+---
+ tests/test_coadmin_miniapp_join.py | 50 +++++++++++++++++++++++++-----
+ 1 file changed, 42 insertions(+), 8 deletions(-)
+
+diff --git a/tests/test_coadmin_miniapp_join.py b/tests/test_coadmin_miniapp_join.py
+index 49152351..5070f9f8 100644
+--- a/tests/test_coadmin_miniapp_join.py
++++ b/tests/test_coadmin_miniapp_join.py
+@@ -48,14 +48,16 @@ def request(self, token, method, payload):
+         self.calls.append((method, payload))
+         return True
+ 
+-    def submit(self, code=CODE, *, notify_applicant=False, uid=USER):
++    def submit(self, code=CODE, *, notify_applicant=False, uid=USER, invite_id=None):
+         return coadmin.submit_invitation(
+-            uid, code, {}, OWNER, self.request, "fixture-token",
+-            now=NOW, notify_applicant=notify_applicant, source="Mini App",
++            uid, None if invite_id is not None else code, {}, OWNER,
++            self.request, "fixture-token", now=NOW,
++            notify_applicant=notify_applicant, source="Mini App",
++            invite_id=invite_id,
+         )
+ 
+     def test_miniapp_uses_same_single_use_invite_and_owner_approval(self):
+-        result = self.submit()
++        result = self.submit(invite_id=7)
+         self.assertEqual(result, {"status": "pending_owner_approval"})
+         row = self.db.execute(
+             "SELECT hash,pending_uid,pending_name,pending_until,nonce "
+@@ -140,9 +142,16 @@ def configured(token, method, payload):
+         with patch.dict(coadmin.os.environ, {
+             "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
+         }):
++            url = coadmin.miniapp_invite_url(configured, "fixture-token", 7)
++            self.assertEqual(
++                url,
++                "https://t.me/BrowserVpsBot?startapp="
++                + coadmin.miniapp_invite_start_param(7, "fixture-token"),
++            )
++            self.assertNotIn(CODE, url)
++            locator = url.split("startapp=", 1)[1]
+             self.assertEqual(
+-                coadmin.miniapp_invite_url(configured, "fixture-token", CODE),
+-                "https://t.me/BrowserVpsBot?startapp=" + CODE,
++                coadmin.verify_miniapp_invite_start_param(locator, "fixture-token"), 7
+             )
+ 
+     def test_no_deep_link_when_main_mini_app_is_not_configured(self):
+@@ -151,7 +160,7 @@ def not_configured(token, method, payload):
+         with patch.dict(coadmin.os.environ, {
+             "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
+         }):
+-            self.assertIsNone(coadmin.miniapp_invite_url(not_configured, "fixture-token", CODE))
++            self.assertIsNone(coadmin.miniapp_invite_url(not_configured, "fixture-token", 7))
+ 
+     def test_invalid_bot_username_never_becomes_a_link(self):
+         def invalid_username(token, method, payload):
+@@ -159,8 +168,33 @@ def invalid_username(token, method, payload):
+         with patch.dict(coadmin.os.environ, {
+             "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
+         }):
+-            self.assertIsNone(coadmin.miniapp_invite_url(invalid_username, "fixture-token", CODE))
++            self.assertIsNone(coadmin.miniapp_invite_url(invalid_username, "fixture-token", 7))
++
++
++    def test_signed_public_locator_rejects_tampering_and_wrong_bot(self):
++        locator = coadmin.miniapp_invite_start_param(7, "fixture-token")
++        self.assertEqual(
++            coadmin.verify_miniapp_invite_start_param(locator, "fixture-token"), 7
++        )
++        self.assertIsNone(
++            coadmin.verify_miniapp_invite_start_param(locator[:-1] + "0", "fixture-token")
++        )
++        self.assertIsNone(
++            coadmin.verify_miniapp_invite_start_param(locator, "other-bot-token")
++        )
++        self.assertIsNone(
++            coadmin.verify_miniapp_invite_start_param("i1_7_00000000000000000000000000000000", "fixture-token")
++        )
++        self.assertIsNone(
++            coadmin.verify_miniapp_invite_start_param("7", "fixture-token")
++        )
+ 
++    def test_miniapp_locator_for_unknown_invite_does_not_consume_anything(self):
++        result = self.submit(invite_id=999)
++        self.assertEqual(result["status"], "invalid")
++        self.assertIsNotNone(
++            self.db.execute("SELECT hash FROM invitations WHERE id=7").fetchone()[0]
++        )
+ 
+     def test_link_stays_disabled_until_operator_confirms_exact_main_app_url(self):
+         def configured(token, method, payload):
+
+From 3b1f3685f60772d38bc29063e2fd2ef6cdff9ea7 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:25:02 +0100
+Subject: [PATCH 14/30] docs(issue516): document non-secret signed invite
+ locator
+
+---
+ docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md b/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md
+index a62f5220..1a5211f9 100644
+--- a/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md
++++ b/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md
+@@ -1,13 +1,13 @@
+ # Telegram Mini App — kontrakt weryfikacji initData (etap L1)
+ 
+-Status: verifier, wspólna operacja zużycia zaproszenia i osobny endpoint Mini App są przygotowane w Draft PR #518. Brak uruchomionych testów CI/E2E i wdrożenia.
++Status: verifier, podpisany publiczny locator zaproszenia, wspólna operacja zużycia zaproszenia i osobny endpoint Mini App są przygotowane w Draft PR #520. Brak uruchomionych testów CI/E2E i wdrożenia.
+ 
+ ## Źródło tożsamości
+ 
+ - Mini App przekazuje backendowi surowe Telegram.WebApp.initData przez HTTPS.
+ - initDataUnsafe jest wyłącznie danymi prezentacyjnymi; nigdy nie może stanowić dowodu tożsamości.
+ - Backend weryfikuje HMAC-SHA-256 zgodnie z Telegram Web Apps, używając tokenu istniejącego bota pobranego wyłącznie z serwerowego magazynu sekretów.
+-- Standardowy UX nie wymaga ręcznego wpisywania Telegram ID, username ani kodu. Link `https://t.me/<bot_username>?startapp=<invite_code>` jest generowany wyłącznie po dwóch bramkach: Bot API `getMe` potwierdza `has_main_web_app=true`, a operator jawnie ustawia `BVP_TELEGRAM_MAIN_MINI_APP_URL=https://148-113-182-137.sslip.io/vps-telegram/mini` po potwierdzeniu dokładnego URL w BotFather. `getMe` potwierdza istnienie Main Mini App, ale nie zwraca jej URL. Telegram przekazuje wtedy startapp jako podpisany `start_param`. Bez tej zmiennej link pozostaje wyłączony i działa dotychczasowa ścieżka `/join_admin KOD`.
++- Standardowy UX nie wymaga ręcznego wpisywania Telegram ID, username ani kodu. Link `https://t.me/<bot_username>?startapp=i1_<invite_id>_<mac>` nie zawiera kodu zaproszenia. Parametr jest publicznym, nieautoryzującym locator-em z MAC HMAC (wersja i identyfikator rekordu); backend weryfikuje MAC przy użyciu tokenu bota, a następnie odszukuje rekord po ID i atomowo zużywa właściwy hash zaproszenia. Nie jest to samodzielny grant dostępu. Link jest generowany wyłącznie po dwóch bramkach: Bot API `getMe` potwierdza `has_main_web_app=true`, a operator jawnie ustawia `BVP_TELEGRAM_MAIN_MINI_APP_URL=https://148-113-182-137.sslip.io/vps-telegram/mini` po potwierdzeniu dokładnego URL w BotFather. `getMe` potwierdza istnienie Main Mini App, ale nie zwraca jej URL. Telegram przekazuje wtedy startapp jako podpisany `start_param`. Bez tej zmiennej link pozostaje wyłączony i działa dotychczasowa ścieżka `/join_admin KOD`.
+ - Po weryfikacji zwracany jest numeryczny Telegram user ID, podpisany auth_date i opcjonalny podpisany start_param. start_param jest ograniczony do składni Telegram (1–512 znaków A-Z/a-z/0-9/_/-); backend może go użyć jako wskazania zaproszenia dopiero po sprawdzeniu go z trwałym rekordem zaproszenia.
+ - Backend nie może przyjmować invite ID, Telegram ID ani username z initDataUnsafe lub zwykłego JSON klienta. start_param musi pochodzić z pól objętych zweryfikowanym HMAC.
+ 
+@@ -21,7 +21,7 @@ Status: verifier, wspólna operacja zużycia zaproszenia i osobny endpoint Mini
+ 
+ ## Granica odpowiedzialności
+ 
+-Weryfikacja initData jest osobna od operacji zaproszenia. Osobny POST `/mini-join` w `src/telegram/bot.py` przyjmuje wyłącznie surowe initData w nagłówku, wymaga podpisanego start_param i przekazuje zweryfikowany Telegram user ID oraz kod do `coadmin.submit_invitation`. Ta sama funkcja obsługuje teraz `/join_admin KOD`; nie jest konstruowany sztuczny update Bot API. W PostgreSQL istniejący hash zaproszenia jest zużywany atomowo (hash=NULL), z istniejącym limitem prób, pending_uid, terminem decyzji i jednorazowym nonce dla decyzji właściciela. Właściciel dostaje dotychczasowy przycisk approve/reject. Mini App otrzymuje tylko status zgłoszenia; nie dostaje dostępu do owner-only `/mini-api` ani `/mini-photo`.
++Weryfikacja initData jest osobna od operacji zaproszenia. Osobny POST `/mini-join` w `src/telegram/bot.py` przyjmuje wyłącznie surowe initData w nagłówku, wymaga zweryfikowanego locator-a `i1_<invite_id>_<mac>` i przekazuje zweryfikowany Telegram user ID oraz invite ID do `coadmin.submit_invitation`. Kod jednorazowy nie trafia do URL; istniejący kod pozostaje dostępny wyłącznie jako fallback `/join_admin KOD`. Ta sama funkcja obsługuje teraz `/join_admin KOD`; nie jest konstruowany sztuczny update Bot API. W PostgreSQL istniejący hash zaproszenia jest zużywany atomowo (hash=NULL), z istniejącym limitem prób, pending_uid, terminem decyzji i jednorazowym nonce dla decyzji właściciela. Właściciel dostaje dotychczasowy przycisk approve/reject. Mini App otrzymuje tylko status zgłoszenia; nie dostaje dostępu do owner-only `/mini-api` ani `/mini-photo`.
+ 
+ Nadal nie ma osobnego rekordu przeglądarkowej sesji invitee ani enrollment grantu Passkey; ten etap nie tworzy sesji, nie zatwierdza zaproszenia i nie nadaje uprawnień.
+ 
+@@ -31,4 +31,9 @@ Pozostaje: (1) potwierdzić w BotFather dokładny URL Main Mini App, ustawić ja
+ 
+ `tests/test_telegram_webapp_init_data.py` pokrywa HMAC, tampering, obcy token, TTL, future skew, duplikaty, malformed input, Telegram user ID i signed start_param. `tests/test_coadmin_miniapp_join.py` pokrywa wspólne zużycie zaproszenia, replay, rate limit, wygasanie, istniejącego administratora i warunek Main Mini App. Testy nie kontaktują się z Telegramem ani VPS.
+ 
+-Brak GO do produkcji: zmiany są wyłącznie w Draft PR #518. Nie wykonywać deploymentu, nie włączać rejestracji Passkey ani nie zmieniać istniejącego logowania właściciela. Weryfikacja CI i E2E pozostaje niepotwierdzona.
++Brak GO do produkcji: zmiany są wyłącznie w Draft PR #520. Nie wykonywać deploymentu, nie włączać rejestracji Passkey ani nie zmieniać istniejącego logowania właściciela. Weryfikacja CI i E2E pozostaje niepotwierdzona.
++
++
++## Ochrona kodu zaproszenia w deep-linku
++
++Deep-link nie zawiera bearer kodu zaproszenia. `start_param` ma format `i1_<invite_id>_<32-hex HMAC tag>` i jest wyliczany z ID rekordu przy użyciu tokenu istniejącego bota jako klucza HMAC. Backend weryfikuje tag stałoczasowo, a następnie pobiera rekord po ID i wykorzystuje wyłącznie zapisany w bazie hash kodu do atomowego zużycia zaproszenia. Locator wskazuje rekord, ale nie nadaje uprawnień; wniosek nadal wymaga decyzji właściciela. Wariant kodowy `/join_admin KOD` pozostaje bez zmian.
+
+From 8c62982cc25dd1c5b62c8dac61c872dd535d0c6e Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:25:04 +0100
+Subject: [PATCH 15/30] docs(issue516): document invite locator without
+ database migration
+
+---
+ docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md b/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md
+index d65edbfa..ceb4c915 100644
+--- a/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md
++++ b/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md
+@@ -16,4 +16,8 @@ Real two-device Android end-to-end invitations remain mandatory before closing i
+ 
+ ## Mini App invitee endpoint — dodatkowy release gate (#516)
+ 
+-Po scaleniu Draft PR #518 (Issue #516) nie wolno wdrażać wyłącznie `bot.py` i `coadmin.py`. Zestaw zgodny musi zawierać także `webapp_init_data.py` oraz zaktualizowany `deploy/telegram/runtime_files.txt`. `deploy/telegram_static_identity.py` wymaga tego modułu jako części kompletnego release. Przed restartem istniejącego pollera/webhooka obowiązkowe są testy offline, QA PostgreSQL, potwierdzenie dokładnego URL Main Mini App w BotFather, jawna konfiguracja `BVP_TELEGRAM_MAIN_MINI_APP_URL`, weryfikacja `getMe.has_main_web_app` i test na dwóch kontach Telegram. Nie tworzyć drugiego procesu bota, nie zmieniać owner-only gate i nie wdrażać tego Draft PR bez odrębnego GO.
++Po scaleniu Draft PR #520 (Issue #516) nie wolno wdrażać wyłącznie `bot.py` i `coadmin.py`. Zestaw zgodny musi zawierać także `webapp_init_data.py` oraz zaktualizowany `deploy/telegram/runtime_files.txt`. `deploy/telegram_static_identity.py` wymaga tego modułu jako części kompletnego release. Przed restartem istniejącego pollera/webhooka obowiązkowe są testy offline, QA PostgreSQL, potwierdzenie dokładnego URL Main Mini App w BotFather, jawna konfiguracja `BVP_TELEGRAM_MAIN_MINI_APP_URL`, weryfikacja `getMe.has_main_web_app` i test na dwóch kontach Telegram. Nie tworzyć drugiego procesu bota, nie zmieniać owner-only gate i nie wdrażać tego Draft PR bez odrębnego GO.
++
++
++## Deep-link invite locator (#516)
++Mini App `start_param` zawiera wyłącznie `i1_<invite_id>_<32-hex HMAC tag>`, nie bearer kod zaproszenia. Backend weryfikuje tag z tokenem istniejącego bota, a następnie pobiera invite po ID i atomowo zużywa hash kodu zapisany w PostgreSQL. Kod fallback `/join_admin KOD` pozostaje obsługiwany. Brak migracji DB: wykorzystano istniejący `invitations.id` i `hash`.
+
+From 6743d87e24a7cb0937b300b9c2809752b238990a Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:27:11 +0100
+Subject: [PATCH 16/30] test(issue516): make locator tamper test deterministic
+
+---
+ tests/test_coadmin_miniapp_join.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/tests/test_coadmin_miniapp_join.py b/tests/test_coadmin_miniapp_join.py
+index 5070f9f8..5d92eae2 100644
+--- a/tests/test_coadmin_miniapp_join.py
++++ b/tests/test_coadmin_miniapp_join.py
+@@ -176,8 +176,9 @@ def test_signed_public_locator_rejects_tampering_and_wrong_bot(self):
+         self.assertEqual(
+             coadmin.verify_miniapp_invite_start_param(locator, "fixture-token"), 7
+         )
++        tampered = locator[:-1] + ("0" if locator[-1] != "0" else "1")
+         self.assertIsNone(
+-            coadmin.verify_miniapp_invite_start_param(locator[:-1] + "0", "fixture-token")
++            coadmin.verify_miniapp_invite_start_param(tampered, "fixture-token")
+         )
+         self.assertIsNone(
+             coadmin.verify_miniapp_invite_start_param(locator, "other-bot-token")
+
+From 80168fd4b115c4ef5dedc9c09e9145f7a273b9c4 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:27:30 +0100
+Subject: [PATCH 17/30] security(issue516): bind public locator MAC to invite
+ generation
+
+---
+ src/telegram/coadmin.py | 53 ++++++++++++++++++++++++++++-------------
+ 1 file changed, 37 insertions(+), 16 deletions(-)
+
+diff --git a/src/telegram/coadmin.py b/src/telegram/coadmin.py
+index d10987f0..7ce1772e 100644
+--- a/src/telegram/coadmin.py
++++ b/src/telegram/coadmin.py
+@@ -145,20 +145,23 @@ def generate_invite_code():
+     alphabet=string.ascii_letters+string.digits
+     return "".join(secrets.choice(alphabet) for _ in range(32))
+ 
+-def miniapp_invite_start_param(invite_id, token):
+-    """Create a public, integrity-protected invite locator; never put the bearer code in a URL."""
++def miniapp_invite_start_param(invite_id, token, invite_hash):
++    """Create a public locator bound to the current invite generation, never the bearer code."""
+     if type(invite_id) is not int or not 1 <= invite_id < 2**63:
+         return None
+-    if not isinstance(token, str) or not token:
++    if (not isinstance(token, str) or not token
++            or not isinstance(invite_hash, str)
++            or not re.fullmatch(r"[0-9a-f]{64}", invite_hash)):
+         return None
+-    message = b"bvp-miniapp-invite:v1:" + str(invite_id).encode("ascii")
++    message = (b"bvp-miniapp-invite:v1:" + str(invite_id).encode("ascii")
++               + b":" + invite_hash.encode("ascii"))
+     tag = hmac.new(token.encode("utf-8"), message, hashlib.sha256).hexdigest()[:32]
+     return "i1_" + str(invite_id) + "_" + tag
+ 
+ 
+-def verify_miniapp_invite_start_param(start_param, token):
+-    """Resolve a signed public locator to an invite ID; it is not an authorization grant."""
+-    if not isinstance(start_param, str) or not isinstance(token, str) or not token:
++def parse_miniapp_invite_start_param(start_param):
++    """Parse a public invite locator; its MAC is checked against the current DB hash."""
++    if not isinstance(start_param, str):
+         return None
+     match = re.fullmatch(r"i1_([1-9][0-9]{0,18})_([0-9a-f]{32})", start_param)
+     if not match:
+@@ -166,16 +169,28 @@ def verify_miniapp_invite_start_param(start_param, token):
+     invite_id = int(match.group(1))
+     if invite_id >= 2**63:
+         return None
+-    expected = miniapp_invite_start_param(invite_id, token)
++    return invite_id, match.group(2)
++
++
++def verify_miniapp_invite_start_param(start_param, token, invite_hash):
++    """Verify locator integrity for a specific invite generation."""
++    parsed = parse_miniapp_invite_start_param(start_param)
++    if not parsed:
++        return None
++    invite_id, _ = parsed
++    expected = miniapp_invite_start_param(invite_id, token, invite_hash)
+     return invite_id if expected and hmac.compare_digest(expected, start_param) else None
+ 
+ 
+-def miniapp_invite_url(request, token, invite_id):
+-    """Return a startapp link only after explicit confirmation of the Main Mini App URL."""
++def miniapp_invite_url(request, token, invite_id, code):
++    """Return a generation-bound startapp link after explicit Main Mini App URL confirmation."""
+     expected_url = "https://148-113-182-137.sslip.io/vps-telegram/mini"
+     if os.environ.get("BVP_TELEGRAM_MAIN_MINI_APP_URL", "").rstrip("/") != expected_url:
+         return None
+-    start_param = miniapp_invite_start_param(invite_id, token)
++    if not isinstance(code, str) or not code:
++        return None
++    invite_hash = hashlib.sha256(code.encode()).hexdigest()
++    start_param = miniapp_invite_start_param(invite_id, token, invite_hash)
+     if not start_param:
+         return None
+     try:
+@@ -213,7 +228,7 @@ def rotate_invite(token,owner,request,ident,now):
+         new=generate_invite_code()
+         con.execute("UPDATE invitations SET hash=? WHERE id=?",(hashlib.sha256(new.encode()).hexdigest(),ident))
+         audit(con,ident,"regenerated",owner)
+-    send(request,token,owner,invitation_message(new,row[0],row[2],ident,True,miniapp_invite_url(request,token,ident)))
++    send(request,token,owner,invitation_message(new,row[0],row[2],ident,True,miniapp_invite_url(request,token,ident,code)))
+ 
+ def expiry_time(expires):
+     import datetime, zoneinfo
+@@ -466,7 +481,7 @@ def command_text(update):
+ 
+ 
+ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
+-                      notify_applicant=True, source="Bot API", invite_id=None):
++                      notify_applicant=True, source="Bot API", invite_id=None, invite_tag=None):
+     """Consume one invitation for a verified Telegram principal.
+ 
+     This is the shared application operation for Bot API /join_admin and the
+@@ -487,7 +502,9 @@ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
+             send(request, token, uid, "✅ Masz już uprawnienia współadministratora.")
+         return {"status": "already_admin"}
+     if invite_id is not None:
+-        if type(invite_id) is not int or not 1 <= invite_id < 2**63:
++        if (type(invite_id) is not int or not 1 <= invite_id < 2**63
++                or not isinstance(invite_tag, str)
++                or not re.fullmatch(r"[0-9a-f]{32}", invite_tag)):
+             return {"status": "invalid"}
+         digest = None
+     else:
+@@ -536,7 +553,11 @@ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
+                     result = "expired"
+                     error = "⌛ Zaproszenie wygasło. Poproś właściciela o nowe."
+                 elif (row and row[1] and row[2] >= now
+-                      and (invite_id is not None or secrets.compare_digest(row[1], digest))):
++                      and (secrets.compare_digest(
++                               miniapp_invite_start_param(invite_id, token, row[1]),
++                               "i1_" + str(invite_id) + "_" + invite_tag)
++                           if invite_id is not None
++                           else secrets.compare_digest(row[1], digest))):
+                     nonce = secrets.token_urlsafe(12)
+                     username = sender.get("username", "")
+                     name = ("@" + username if isinstance(username, str)
+@@ -727,7 +748,7 @@ def handle(token, owner, update, request):
+             ident=con.execute("SELECT last_insert_rowid()").fetchone()[0]
+             con.execute("UPDATE invitations SET created_at=?,issued_seconds=? WHERE id=?",(now,ttl,ident))
+             audit(con,ident,"created",owner)
+-        send(request,token,owner,invitation_message(code,now+ttl,ttl,ident,False,miniapp_invite_url(request,token,ident)))
++        send(request,token,owner,invitation_message(code,now+ttl,ttl,ident,False,miniapp_invite_url(request,token,ident,new)))
+     elif action=="/cancel_invite":
+         parts=raw.split()
+         if len(parts)!=2 or not parts[1].isdecimal():
+
+From 3e094f3f7211135c6a627dd8473a36d454aafcd0 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:27:50 +0100
+Subject: [PATCH 18/30] security(issue516): validate invite generation MAC
+ during atomic consume
+
+---
+ src/telegram/bot.py | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/src/telegram/bot.py b/src/telegram/bot.py
+index 4f3f9c4c..8ffaa0b9 100644
+--- a/src/telegram/bot.py
++++ b/src/telegram/bot.py
+@@ -1675,14 +1675,16 @@ def do_POST(self):
+                     init=self.headers.get("X-Telegram-Init-Data","")
+                     identity=webapp_init_data.verify_telegram_webapp_init_data(
+                         init,token,now=int(time.time()))
+-                    invite_id=coadmin.verify_miniapp_invite_start_param(
+-                        identity.start_param,token)
+-                    if invite_id is None:
++                    locator=coadmin.parse_miniapp_invite_start_param(
++                        identity.start_param)
++                    if locator is None:
+                         self.send_error(403);return
++                    invite_id,invite_tag=locator
+                     result=coadmin.submit_invitation(
+                         identity.telegram_user_id,None,{},
+                         owner_id,request,token,now=int(time.time()),
+-                        notify_applicant=False,source="Mini App",invite_id=invite_id)
++                        notify_applicant=False,source="Mini App",
++                        invite_id=invite_id,invite_tag=invite_tag)
+                     messages={
+                         "pending_owner_approval":"✅ Zaproszenie zostało przyjęte. Właściciel otrzymał zgłoszenie. Dostęp zostanie przyznany dopiero po jego zatwierdzeniu.",
+                         "already_admin":"✅ To konto ma już uprawnienia współadministratora.",
+
+From 08430d3ad19981e596e969d45b5e442e60197e98 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:27:55 +0100
+Subject: [PATCH 19/30] test(issue516): bind locator to invite generation and
+ cover rotation
+
+---
+ tests/test_coadmin_miniapp_join.py | 50 ++++++++++++++++++++++--------
+ 1 file changed, 37 insertions(+), 13 deletions(-)
+
+diff --git a/tests/test_coadmin_miniapp_join.py b/tests/test_coadmin_miniapp_join.py
+index 5d92eae2..65116145 100644
+--- a/tests/test_coadmin_miniapp_join.py
++++ b/tests/test_coadmin_miniapp_join.py
+@@ -48,16 +48,21 @@ def request(self, token, method, payload):
+         self.calls.append((method, payload))
+         return True
+ 
+-    def submit(self, code=CODE, *, notify_applicant=False, uid=USER, invite_id=None):
++    def submit(self, code=CODE, *, notify_applicant=False, uid=USER,
++               invite_id=None, invite_tag=None):
+         return coadmin.submit_invitation(
+             uid, None if invite_id is not None else code, {}, OWNER,
+             self.request, "fixture-token", now=NOW,
+             notify_applicant=notify_applicant, source="Mini App",
+-            invite_id=invite_id,
++            invite_id=invite_id, invite_tag=invite_tag,
+         )
+ 
+     def test_miniapp_uses_same_single_use_invite_and_owner_approval(self):
+-        result = self.submit(invite_id=7)
++        locator = coadmin.miniapp_invite_start_param(
++            7, "fixture-token", hashlib.sha256(CODE.encode()).hexdigest()
++        )
++        invite_id, invite_tag = coadmin.parse_miniapp_invite_start_param(locator)
++        result = self.submit(invite_id=invite_id, invite_tag=invite_tag)
+         self.assertEqual(result, {"status": "pending_owner_approval"})
+         row = self.db.execute(
+             "SELECT hash,pending_uid,pending_name,pending_until,nonce "
+@@ -142,16 +147,20 @@ def configured(token, method, payload):
+         with patch.dict(coadmin.os.environ, {
+             "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
+         }):
+-            url = coadmin.miniapp_invite_url(configured, "fixture-token", 7)
++            url = coadmin.miniapp_invite_url(configured, "fixture-token", 7, CODE)
+             self.assertEqual(
+                 url,
+                 "https://t.me/BrowserVpsBot?startapp="
+-                + coadmin.miniapp_invite_start_param(7, "fixture-token"),
++                + coadmin.miniapp_invite_start_param(
++                    7, "fixture-token", hashlib.sha256(CODE.encode()).hexdigest()
++                ),
+             )
+             self.assertNotIn(CODE, url)
+             locator = url.split("startapp=", 1)[1]
+             self.assertEqual(
+-                coadmin.verify_miniapp_invite_start_param(locator, "fixture-token"), 7
++                coadmin.verify_miniapp_invite_start_param(
++                    locator, "fixture-token", hashlib.sha256(CODE.encode()).hexdigest()
++                ), 7
+             )
+ 
+     def test_no_deep_link_when_main_mini_app_is_not_configured(self):
+@@ -172,26 +181,41 @@ def invalid_username(token, method, payload):
+ 
+ 
+     def test_signed_public_locator_rejects_tampering_and_wrong_bot(self):
+-        locator = coadmin.miniapp_invite_start_param(7, "fixture-token")
++        invite_hash = hashlib.sha256(CODE.encode()).hexdigest()
++        locator = coadmin.miniapp_invite_start_param(7, "fixture-token", invite_hash)
+         self.assertEqual(
+-            coadmin.verify_miniapp_invite_start_param(locator, "fixture-token"), 7
++            coadmin.verify_miniapp_invite_start_param(locator, "fixture-token", invite_hash), 7
+         )
+         tampered = locator[:-1] + ("0" if locator[-1] != "0" else "1")
+         self.assertIsNone(
+-            coadmin.verify_miniapp_invite_start_param(tampered, "fixture-token")
++            coadmin.verify_miniapp_invite_start_param(tampered, "fixture-token", invite_hash)
+         )
+         self.assertIsNone(
+-            coadmin.verify_miniapp_invite_start_param(locator, "other-bot-token")
++            coadmin.verify_miniapp_invite_start_param(locator, "other-bot-token", invite_hash)
+         )
+         self.assertIsNone(
+-            coadmin.verify_miniapp_invite_start_param("i1_7_00000000000000000000000000000000", "fixture-token")
++            coadmin.verify_miniapp_invite_start_param(
++                "i1_7_00000000000000000000000000000000", "fixture-token", invite_hash
++            )
+         )
++        self.assertIsNone(coadmin.parse_miniapp_invite_start_param("7"))
++        rotated_hash = hashlib.sha256(b"rotated-invite-code").hexdigest()
+         self.assertIsNone(
+-            coadmin.verify_miniapp_invite_start_param("7", "fixture-token")
++            coadmin.verify_miniapp_invite_start_param(locator, "fixture-token", rotated_hash)
++        )
++        rotated_locator = coadmin.miniapp_invite_start_param(7, "fixture-token", rotated_hash)
++        self.assertNotEqual(locator, rotated_locator)
++        self.assertEqual(
++            coadmin.verify_miniapp_invite_start_param(
++                rotated_locator, "fixture-token", rotated_hash
++            ), 7
+         )
+ 
+     def test_miniapp_locator_for_unknown_invite_does_not_consume_anything(self):
+-        result = self.submit(invite_id=999)
++        invite_hash = hashlib.sha256(CODE.encode()).hexdigest()
++        locator = coadmin.miniapp_invite_start_param(999, "fixture-token", invite_hash)
++        invite_id, invite_tag = coadmin.parse_miniapp_invite_start_param(locator)
++        result = self.submit(invite_id=invite_id, invite_tag=invite_tag)
+         self.assertEqual(result["status"], "invalid")
+         self.assertIsNotNone(
+             self.db.execute("SELECT hash FROM invitations WHERE id=7").fetchone()[0]
+
+From a50a666075ea0210e7fe82e538c5361c1432a613 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:28:05 +0100
+Subject: [PATCH 20/30] fix(issue516): fail closed on malformed stored invite
+ hash
+
+---
+ src/telegram/coadmin.py | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/telegram/coadmin.py b/src/telegram/coadmin.py
+index 7ce1772e..b961f202 100644
+--- a/src/telegram/coadmin.py
++++ b/src/telegram/coadmin.py
+@@ -182,6 +182,13 @@ def verify_miniapp_invite_start_param(start_param, token, invite_hash):
+     return invite_id if expected and hmac.compare_digest(expected, start_param) else None
+ 
+ 
++def miniapp_invite_locator_matches(invite_id, token, invite_hash, invite_tag):
++    expected = miniapp_invite_start_param(invite_id, token, invite_hash)
++    supplied = ("i1_" + str(invite_id) + "_" + invite_tag
++                if isinstance(invite_tag, str) else "")
++    return bool(expected and supplied and hmac.compare_digest(expected, supplied))
++
++
+ def miniapp_invite_url(request, token, invite_id, code):
+     """Return a generation-bound startapp link after explicit Main Mini App URL confirmation."""
+     expected_url = "https://148-113-182-137.sslip.io/vps-telegram/mini"
+@@ -553,9 +560,8 @@ def submit_invitation(uid, code, sender, owner, request, token, *, now=None,
+                     result = "expired"
+                     error = "⌛ Zaproszenie wygasło. Poproś właściciela o nowe."
+                 elif (row and row[1] and row[2] >= now
+-                      and (secrets.compare_digest(
+-                               miniapp_invite_start_param(invite_id, token, row[1]),
+-                               "i1_" + str(invite_id) + "_" + invite_tag)
++                      and (miniapp_invite_locator_matches(
++                               invite_id, token, row[1], invite_tag)
+                            if invite_id is not None
+                            else secrets.compare_digest(row[1], digest))):
+                     nonce = secrets.token_urlsafe(12)
+
+From d3e63ef1cdf0be1ebdfff50fe272294320a8633c Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:28:39 +0100
+Subject: [PATCH 21/30] docs(issue516): document generation-bound invite
+ locator and rotation
+
+---
+ docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md b/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md
+index 1a5211f9..b3f57de4 100644
+--- a/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md
++++ b/docs/TELEGRAM_MINI_APP_IDENTITY_CONTRACT.md
+@@ -37,3 +37,7 @@ Brak GO do produkcji: zmiany są wyłącznie w Draft PR #520. Nie wykonywać dep
+ ## Ochrona kodu zaproszenia w deep-linku
+ 
+ Deep-link nie zawiera bearer kodu zaproszenia. `start_param` ma format `i1_<invite_id>_<32-hex HMAC tag>` i jest wyliczany z ID rekordu przy użyciu tokenu istniejącego bota jako klucza HMAC. Backend weryfikuje tag stałoczasowo, a następnie pobiera rekord po ID i wykorzystuje wyłącznie zapisany w bazie hash kodu do atomowego zużycia zaproszenia. Locator wskazuje rekord, ale nie nadaje uprawnień; wniosek nadal wymaga decyzji właściciela. Wariant kodowy `/join_admin KOD` pozostaje bez zmian.
++
++
++## Rotacja i unieważnianie locatora
++MAC jest wyliczany z wersji protokołu, invite ID oraz aktualnego SHA-256 kodu zaproszenia. Backend porównuje locator z hashem pobranym w tej samej transakcji co zużycie invite. Regeneracja kodu zmienia hash i automatycznie unieważnia poprzedni `startapp`, bez dodatkowej kolumny/migracji. Locator nie ujawnia kodu ani jego hasha.
+
+From 0328c5d4d881c51ccc94e90bf4d7734c8582e5cc Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:28:42 +0100
+Subject: [PATCH 22/30] docs(issue516): document locator invalidation on invite
+ rotation
+
+---
+ docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md b/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md
+index ceb4c915..3145632f 100644
+--- a/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md
++++ b/docs/TELEGRAM_COADMIN_PG_LIVE_CUTOVER.md
+@@ -21,3 +21,6 @@ Po scaleniu Draft PR #520 (Issue #516) nie wolno wdrażać wyłącznie `bot.py`
+ 
+ ## Deep-link invite locator (#516)
+ Mini App `start_param` zawiera wyłącznie `i1_<invite_id>_<32-hex HMAC tag>`, nie bearer kod zaproszenia. Backend weryfikuje tag z tokenem istniejącego bota, a następnie pobiera invite po ID i atomowo zużywa hash kodu zapisany w PostgreSQL. Kod fallback `/join_admin KOD` pozostaje obsługiwany. Brak migracji DB: wykorzystano istniejący `invitations.id` i `hash`.
++
++
++Regeneracja invite zmienia kod/hash, więc zmienia się także HMAC locator `startapp`. Backend weryfikuje tag względem aktualnego hasha z tego samego rekordu w transakcji zużycia; stare linki stają się nieważne bez migracji DB.
+
+From 709a8f0d1d5c8892688077a2910fc2c4220b2f4c Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:29:13 +0100
+Subject: [PATCH 23/30] test(issue516): assert invite rotation invalidates old
+ Mini App link
+
+---
+ tests/test_coadmin_miniapp_join.py | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/tests/test_coadmin_miniapp_join.py b/tests/test_coadmin_miniapp_join.py
+index 65116145..d0574ec6 100644
+--- a/tests/test_coadmin_miniapp_join.py
++++ b/tests/test_coadmin_miniapp_join.py
+@@ -211,6 +211,23 @@ def test_signed_public_locator_rejects_tampering_and_wrong_bot(self):
+             ), 7
+         )
+ 
++    def test_rotated_invite_invalidates_previous_miniapp_locator(self):
++        old_hash = hashlib.sha256(CODE.encode()).hexdigest()
++        old_locator = coadmin.miniapp_invite_start_param(7, "fixture-token", old_hash)
++        _, old_tag = coadmin.parse_miniapp_invite_start_param(old_locator)
++        new_code = "SyntheticRotatedInviteCode987654"
++        new_hash = hashlib.sha256(new_code.encode()).hexdigest()
++        self.db.execute("UPDATE invitations SET hash=? WHERE id=7", (new_hash,))
++        old_result = self.submit(invite_id=7, invite_tag=old_tag)
++        self.assertEqual(old_result["status"], "invalid")
++        self.assertIsNone(
++            self.db.execute("SELECT pending_uid FROM invitations WHERE id=7").fetchone()[0]
++        )
++        new_locator = coadmin.miniapp_invite_start_param(7, "fixture-token", new_hash)
++        _, new_tag = coadmin.parse_miniapp_invite_start_param(new_locator)
++        new_result = self.submit(invite_id=7, invite_tag=new_tag)
++        self.assertEqual(new_result["status"], "pending_owner_approval")
++
+     def test_miniapp_locator_for_unknown_invite_does_not_consume_anything(self):
+         invite_hash = hashlib.sha256(CODE.encode()).hexdigest()
+         locator = coadmin.miniapp_invite_start_param(999, "fixture-token", invite_hash)
+
+From c36c76f2143b43a81ed0a8eb5c117b56429f3580 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:29:33 +0100
+Subject: [PATCH 24/30] fix(issue516): show controlled errors for Mini App join
+ responses
+
+---
+ src/telegram/bot.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/telegram/bot.py b/src/telegram/bot.py
+index 8ffaa0b9..e92e8fa5 100644
+--- a/src/telegram/bot.py
++++ b/src/telegram/bot.py
+@@ -1606,7 +1606,7 @@ def miniapp_authorized(initdata, token, owner_id):
+   const response=await fetch("./mini-join",{method:"POST",
+    headers:{"Content-Type":"application/json","X-Telegram-Init-Data":init},
+    body:"{}"});
+-  const data=await response.json();
++  const data=await response.json().catch(()=>({}));
+   if(!response.ok)throw Error(data.message||("HTTP "+response.status));
+   status.textContent=data.message||"Zgłoszenie zostało przetworzone.";
+   rows.replaceChildren();
+
+From 4cf8c75f4f8772d36e2529f5f1ab332c54bcecc0 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:46:45 +0100
+Subject: [PATCH 25/30] fix(telegram): use rotated invite code for Mini App
+ link
+
+---
+ src/telegram/coadmin.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/telegram/coadmin.py b/src/telegram/coadmin.py
+index b961f202..a78c8e9b 100644
+--- a/src/telegram/coadmin.py
++++ b/src/telegram/coadmin.py
+@@ -235,7 +235,7 @@ def rotate_invite(token,owner,request,ident,now):
+         new=generate_invite_code()
+         con.execute("UPDATE invitations SET hash=? WHERE id=?",(hashlib.sha256(new.encode()).hexdigest(),ident))
+         audit(con,ident,"regenerated",owner)
+-    send(request,token,owner,invitation_message(new,row[0],row[2],ident,True,miniapp_invite_url(request,token,ident,code)))
++    send(request,token,owner,invitation_message(new,row[0],row[2],ident,True,miniapp_invite_url(request,token,ident,new)))
+ 
+ def expiry_time(expires):
+     import datetime, zoneinfo
+
+From f8837bb0bcf158202e0f7aeaaba0a1fabd61d389 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 19:47:06 +0100
+Subject: [PATCH 26/30] test(telegram): cover Mini App link after invite
+ rotation
+
+---
+ tests/test_coadmin_miniapp_join.py | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/tests/test_coadmin_miniapp_join.py b/tests/test_coadmin_miniapp_join.py
+index d0574ec6..fb1f0fb8 100644
+--- a/tests/test_coadmin_miniapp_join.py
++++ b/tests/test_coadmin_miniapp_join.py
+@@ -252,5 +252,28 @@ def test_invalid_format_does_not_consume_invitation(self):
+         )
+ 
+ 
++    def test_rotate_invite_builds_miniapp_link_from_new_code(self):
++        rotated_code = "SyntheticRotatedInviteCode987654"
++        link = "https://t.me/BrowserVpsBot?startapp=i1_7_fixture"
++        with patch.object(coadmin, "generate_invite_code",
++                          return_value=rotated_code), \\
++             patch.object(coadmin, "miniapp_invite_url",
++                          return_value=link) as make_link, \\
++             patch.object(coadmin, "send") as send, \\
++             patch.object(coadmin, "audit"):
++            coadmin.rotate_invite(
++                "fixture-token", OWNER, self.request, 7, NOW
++            )
++        make_link.assert_called_once_with(
++            self.request, "fixture-token", 7, rotated_code
++        )
++        sent_message = send.call_args.args[3]
++        self.assertIn(link, sent_message)
++        self.assertEqual(
++            self.db.execute("SELECT hash FROM invitations WHERE id=7").fetchone()[0],
++            hashlib.sha256(rotated_code.encode()).hexdigest(),
++        )
++
++
+ if __name__ == "__main__":
+     unittest.main()
+
+From 80a08dded5e1c62bd61849227b381f90f580568f Mon Sep 17 00:00:00 2001
+From: MarVinPL <5693770+MarVinPL@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 18:59:02 +0000
+Subject: [PATCH 27/30] test(telegram): fix Mini App invite test syntax and
+ calls
+
+---
+ tests/test_coadmin_miniapp_join.py | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/tests/test_coadmin_miniapp_join.py b/tests/test_coadmin_miniapp_join.py
+index fb1f0fb8..262473bf 100644
+--- a/tests/test_coadmin_miniapp_join.py
++++ b/tests/test_coadmin_miniapp_join.py
+@@ -169,7 +169,7 @@ def not_configured(token, method, payload):
+         with patch.dict(coadmin.os.environ, {
+             "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
+         }):
+-            self.assertIsNone(coadmin.miniapp_invite_url(not_configured, "fixture-token", 7))
++            self.assertIsNone(coadmin.miniapp_invite_url(not_configured, "fixture-token", 7, CODE))
+ 
+     def test_invalid_bot_username_never_becomes_a_link(self):
+         def invalid_username(token, method, payload):
+@@ -177,7 +177,7 @@ def invalid_username(token, method, payload):
+         with patch.dict(coadmin.os.environ, {
+             "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
+         }):
+-            self.assertIsNone(coadmin.miniapp_invite_url(invalid_username, "fixture-token", 7))
++            self.assertIsNone(coadmin.miniapp_invite_url(invalid_username, "fixture-token", 7, CODE))
+ 
+ 
+     def test_signed_public_locator_rejects_tampering_and_wrong_bot(self):
+@@ -242,7 +242,7 @@ def test_link_stays_disabled_until_operator_confirms_exact_main_app_url(self):
+         def configured(token, method, payload):
+             return {"username": "BrowserVpsBot", "has_main_web_app": True}
+         with patch.dict(coadmin.os.environ, {"BVP_TELEGRAM_MAIN_MINI_APP_URL": ""}):
+-            self.assertIsNone(coadmin.miniapp_invite_url(configured, "fixture-token", CODE))
++            self.assertIsNone(coadmin.miniapp_invite_url(configured, "fixture-token", 7, CODE))
+ 
+     def test_invalid_format_does_not_consume_invitation(self):
+         result = self.submit(code="not valid")
+@@ -255,12 +255,12 @@ def test_invalid_format_does_not_consume_invitation(self):
+     def test_rotate_invite_builds_miniapp_link_from_new_code(self):
+         rotated_code = "SyntheticRotatedInviteCode987654"
+         link = "https://t.me/BrowserVpsBot?startapp=i1_7_fixture"
+-        with patch.object(coadmin, "generate_invite_code",
+-                          return_value=rotated_code), \\
+-             patch.object(coadmin, "miniapp_invite_url",
+-                          return_value=link) as make_link, \\
+-             patch.object(coadmin, "send") as send, \\
+-             patch.object(coadmin, "audit"):
++        with (
++            patch.object(coadmin, "generate_invite_code", return_value=rotated_code),
++            patch.object(coadmin, "miniapp_invite_url", return_value=link) as make_link,
++            patch.object(coadmin, "send") as send,
++            patch.object(coadmin, "audit"),
++        ):
+             coadmin.rotate_invite(
+                 "fixture-token", OWNER, self.request, 7, NOW
+             )
+
+From f3ceb2411fcad9e9d3a8ba003c3f14ff0d2e2da2 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 20:59:57 +0100
+Subject: [PATCH 28/30] Keep invitee Mini App join route out of production bot
+ runtime
+
+---
+ src/telegram/bot.py | 72 ++-------------------------------------------
+ 1 file changed, 2 insertions(+), 70 deletions(-)
+
+diff --git a/src/telegram/bot.py b/src/telegram/bot.py
+index e92e8fa5..9974c64a 100644
+--- a/src/telegram/bot.py
++++ b/src/telegram/bot.py
+@@ -6,10 +6,9 @@
+ """
+ import datetime
+ if __package__:
+-    from . import coadmin, backup_catalog_menu, postgresql_backup_owner, telegram_state_store, task_session_menu, telegram_clear, webapp_init_data
++    from . import coadmin, backup_catalog_menu, postgresql_backup_owner, telegram_state_store, task_session_menu, telegram_clear
+ else:
+     import coadmin
+-    import webapp_init_data
+     import backup_catalog_menu
+     import postgresql_backup_owner
+     import telegram_state_store
+@@ -1600,26 +1599,7 @@ def miniapp_authorized(initdata, token, owner_id):
+   }
+  }catch(e){status.textContent="⛔ Brak autoryzacji lub połączenia: "+e.message}
+ }
+-async function joinInvite(){
+- status.textContent="🔐 Weryfikuję zaproszenie w Telegramie…";
+- try{
+-  const response=await fetch("./mini-join",{method:"POST",
+-   headers:{"Content-Type":"application/json","X-Telegram-Init-Data":init},
+-   body:"{}"});
+-  const data=await response.json().catch(()=>({}));
+-  if(!response.ok)throw Error(data.message||("HTTP "+response.status));
+-  status.textContent=data.message||"Zgłoszenie zostało przetworzone.";
+-  rows.replaceChildren();
+-  result.textContent="Ta ścieżka służy wyłącznie do zgłoszenia zaproszenia. Nie daje dostępu do panelu.";
+- }catch(error){
+-  status.textContent="⛔ "+(error.message||"Nie udało się zweryfikować zaproszenia.");
+-  rows.replaceChildren();
+-  result.textContent="Jeśli zaproszenie jest nadal ważne, poproś właściciela o nowy link.";
+- }
+-}
+-if(!init)status.textContent="Otwórz aplikację z menu bota Telegram.";
+-else if(tg?.initDataUnsafe?.start_param)joinInvite();
+-else {refresh();setInterval(()=>{if(document.visibilityState==="visible")refresh()},30000)}
++if(!init)status.textContent="Otwórz aplikację z menu bota Telegram.";else {refresh();setInterval(()=>{if(document.visibilityState==="visible")refresh()},30000)}
+ </script></html>"""
+ 
+ def sync_telegram_commands(token,owner_id):
+@@ -1663,54 +1643,6 @@ def do_GET(self):
+             self.end_headers();self.wfile.write(data)
+         def do_POST(self):
+             nonlocal offset
+-            if self.path=="/mini-join":
+-                if self.headers.get("Content-Type")!="application/json":
+-                    self.send_error(415);return
+-                try:
+-                    n=int(self.headers.get("Content-Length","0"))
+-                    if not 2<=n<=64:raise ValueError()
+-                    payload=json.loads(self.rfile.read(n))
+-                    if not isinstance(payload,dict) or payload:
+-                        raise ValueError()
+-                    init=self.headers.get("X-Telegram-Init-Data","")
+-                    identity=webapp_init_data.verify_telegram_webapp_init_data(
+-                        init,token,now=int(time.time()))
+-                    locator=coadmin.parse_miniapp_invite_start_param(
+-                        identity.start_param)
+-                    if locator is None:
+-                        self.send_error(403);return
+-                    invite_id,invite_tag=locator
+-                    result=coadmin.submit_invitation(
+-                        identity.telegram_user_id,None,{},
+-                        owner_id,request,token,now=int(time.time()),
+-                        notify_applicant=False,source="Mini App",
+-                        invite_id=invite_id,invite_tag=invite_tag)
+-                    messages={
+-                        "pending_owner_approval":"✅ Zaproszenie zostało przyjęte. Właściciel otrzymał zgłoszenie. Dostęp zostanie przyznany dopiero po jego zatwierdzeniu.",
+-                        "already_admin":"✅ To konto ma już uprawnienia współadministratora.",
+-                        "owner":"To jest konto właściciela — zaproszenie nie jest potrzebne.",
+-                        "already_pending":"⏳ To zaproszenie zostało już zgłoszone. Oczekuj na decyzję właściciela.",
+-                        "rate_limited":"⏳ Przekroczono limit prób. Spróbuj później.",
+-                        "expired":"⌛ Zaproszenie wygasło. Poproś właściciela o nowe.",
+-                        "invalid_format":"❌ Link zaproszenia jest nieprawidłowy.",
+-                        "invalid":"❌ Zaproszenie jest nieprawidłowe lub nieaktualne.",
+-                    }
+-                    body=json.dumps({"status":result["status"],
+-                        "message":messages.get(result["status"],messages["invalid"])}).encode()
+-                    self.send_response(200)
+-                    self.send_header("Content-Type","application/json; charset=utf-8")
+-                    self.send_header("Cache-Control","no-store")
+-                    self.send_header("X-Content-Type-Options","nosniff")
+-                    self.send_header("Content-Length",str(len(body)))
+-                    self.end_headers();self.wfile.write(body)
+-                except webapp_init_data.TelegramInitDataError:
+-                    self.send_error(403)
+-                except (ValueError,TypeError,UnicodeError):
+-                    self.send_error(400)
+-                except Exception:
+-                    print("MINIAPP_INVITEE_SUBMISSION_FAILED",flush=True)
+-                    self.send_error(503)
+-                return
+             if self.path=="/mini-photo":
+                 init=self.headers.get("X-Telegram-Init-Data","")
+                 if not miniapp_authorized(init,token,owner_id):
+
+From 6413a7716fe1694415183fa444526b558556e0ca Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 21:00:07 +0100
+Subject: [PATCH 29/30] Disable production invite deep links until separately
+ reviewed release
+
+---
+ src/telegram/coadmin.py | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/src/telegram/coadmin.py b/src/telegram/coadmin.py
+index a78c8e9b..8e1db7b7 100644
+--- a/src/telegram/coadmin.py
++++ b/src/telegram/coadmin.py
+@@ -190,9 +190,12 @@ def miniapp_invite_locator_matches(invite_id, token, invite_hash, invite_tag):
+ 
+ 
+ def miniapp_invite_url(request, token, invite_id, code):
+-    """Return a generation-bound startapp link after explicit Main Mini App URL confirmation."""
+-    expected_url = "https://148-113-182-137.sslip.io/vps-telegram/mini"
+-    if os.environ.get("BVP_TELEGRAM_MAIN_MINI_APP_URL", "").rstrip("/") != expected_url:
++    """Return a test-only startapp link; production links stay disabled in this PR."""
++    if os.environ.get("BVP_TELEGRAM_TEST_MODE") != "1":
++        return None
++    expected_url = "https://148-113-182-137.sslip.io/vps-telegram-test/mini"
++    configured_url = os.environ.get("BVP_TELEGRAM_TEST_MINI_APP_URL", "").rstrip("/")
++    if configured_url != expected_url:
+         return None
+     if not isinstance(code, str) or not code:
+         return None
+
+From c2ffa578b41f7ca53504b81746718eb20570f944 Mon Sep 17 00:00:00 2001
+From: Marcin Michalak <marvin1994pl@gmail.com>
+Date: Thu, 12 Nov 2026 21:00:22 +0100
+Subject: [PATCH 30/30] Test production join route remains disabled until
+ separate release
+
+---
+ tests/test_coadmin_miniapp_join.py | 42 +++++++++++++++---------------
+ 1 file changed, 21 insertions(+), 21 deletions(-)
+
+diff --git a/tests/test_coadmin_miniapp_join.py b/tests/test_coadmin_miniapp_join.py
+index 262473bf..913ab8c8 100644
+--- a/tests/test_coadmin_miniapp_join.py
++++ b/tests/test_coadmin_miniapp_join.py
+@@ -2,6 +2,7 @@
+ import hashlib
+ import sqlite3
+ import unittest
++from pathlib import Path
+ from unittest.mock import patch
+ 
+ from src.telegram import coadmin
+@@ -140,34 +141,32 @@ def test_owner_cannot_use_an_invitation(self):
+         )
+ 
+ 
+-    def test_deep_link_is_generated_only_when_main_mini_app_is_configured(self):
+-        def configured(token, method, payload):
+-            self.assertEqual((token, method, payload), ("fixture-token", "getMe", {}))
+-            return {"username": "BrowserVpsBot", "has_main_web_app": True}
++    def test_production_deep_links_remain_disabled_until_separate_release(self):
++        def unexpected_request(*args):
++            self.fail("Production bot API must not be queried for a Mini App invite link.")
+         with patch.dict(coadmin.os.environ, {
+-            "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
++            "BVP_TELEGRAM_TEST_MODE": "",
++            "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini",
++            "BVP_TELEGRAM_TEST_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram-test/mini",
+         }):
+-            url = coadmin.miniapp_invite_url(configured, "fixture-token", 7, CODE)
+-            self.assertEqual(
+-                url,
+-                "https://t.me/BrowserVpsBot?startapp="
+-                + coadmin.miniapp_invite_start_param(
+-                    7, "fixture-token", hashlib.sha256(CODE.encode()).hexdigest()
+-                ),
+-            )
+-            self.assertNotIn(CODE, url)
+-            locator = url.split("startapp=", 1)[1]
+-            self.assertEqual(
+-                coadmin.verify_miniapp_invite_start_param(
+-                    locator, "fixture-token", hashlib.sha256(CODE.encode()).hexdigest()
+-                ), 7
++            self.assertIsNone(
++                coadmin.miniapp_invite_url(unexpected_request, "fixture-token", 7, CODE)
+             )
+ 
++    def test_production_bot_does_not_expose_mini_join_http_route(self):
++        source = (Path(__file__).parents[1] / "src" / "telegram" / "bot.py").read_text(
++            encoding="utf-8"
++        )
++        self.assertNotIn('self.path=="/mini-join"', source)
++        self.assertNotIn('fetch("./mini-join"', source)
++        self.assertNotIn("webapp_init_data", source)
++
+     def test_no_deep_link_when_main_mini_app_is_not_configured(self):
+         def not_configured(token, method, payload):
+             return {"username": "BrowserVpsBot", "has_main_web_app": False}
+         with patch.dict(coadmin.os.environ, {
+-            "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
++            "BVP_TELEGRAM_TEST_MODE": "1",
++            "BVP_TELEGRAM_TEST_MINI_APP_URL": "",
+         }):
+             self.assertIsNone(coadmin.miniapp_invite_url(not_configured, "fixture-token", 7, CODE))
+ 
+@@ -175,7 +174,8 @@ def test_invalid_bot_username_never_becomes_a_link(self):
+         def invalid_username(token, method, payload):
+             return {"username": "bad/name", "has_main_web_app": True}
+         with patch.dict(coadmin.os.environ, {
+-            "BVP_TELEGRAM_MAIN_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram/mini"
++            "BVP_TELEGRAM_TEST_MODE": "1",
++            "BVP_TELEGRAM_TEST_MINI_APP_URL": "https://148-113-182-137.sslip.io/vps-telegram-test/mini"
+         }):
+             self.assertIsNone(coadmin.miniapp_invite_url(invalid_username, "fixture-token", 7, CODE))
+ 
