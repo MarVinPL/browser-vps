@@ -25,6 +25,11 @@ class MiniAppInviteSubmissionTests(unittest.TestCase):
                 pending_until INTEGER, nonce TEXT UNIQUE, created_at INTEGER,
                 issued_seconds INTEGER);
             CREATE TABLE denied_alerts(uid INTEGER PRIMARY KEY, last_at INTEGER);
+            CREATE TABLE invite_history(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, invite_id INTEGER,
+                action TEXT, actor_id INTEGER, subject_id INTEGER, at INTEGER,
+                decision_nonce_hash TEXT
+            );
             INSERT INTO invitations VALUES(
                 7, '"""+hashlib.sha256(CODE.encode()).hexdigest()+"""',
                 1800000600, NULL, NULL, NULL, NULL, 1799999900, 600
@@ -57,6 +62,60 @@ class MiniAppInviteSubmissionTests(unittest.TestCase):
             notify_applicant=notify_applicant, source="Mini App",
             invite_id=invite_id, invite_tag=invite_tag,
         )
+
+
+    def test_consumed_invite_does_not_disclose_already_pending_without_valid_mac(self):
+        invite_hash = hashlib.sha256(CODE.encode()).hexdigest()
+        locator = coadmin.miniapp_invite_start_param(7, "fixture-token", invite_hash)
+        _, tag = coadmin.parse_miniapp_invite_start_param(locator)
+        self.db.execute(
+            "UPDATE invitations SET hash=NULL,pending_uid=?,pending_name=?,pending_until=?,nonce=? WHERE id=7",
+            (USER, "@existing_user", NOW + 600, "existing-pending-nonce"),
+        )
+        self.db.commit()
+        result = self.submit(invite_id=7, invite_tag=tag)
+        self.assertEqual(result["status"], "invalid")
+
+    def test_owner_alert_includes_verified_sender_username(self):
+        result = coadmin.submit_invitation(
+            USER, CODE, {"username": "invitee_user"}, OWNER,
+            self.request, "fixture-token", now=NOW, source="Bot API",
+        )
+        self.assertEqual(result["status"], "pending_owner_approval")
+        owner_alerts = [
+            p for method, p in self.calls
+            if method == "sendMessage" and p["chat_id"] == OWNER
+        ]
+        self.assertEqual(len(owner_alerts), 1)
+        self.assertIn("👤 Nazwa: @invitee_user", owner_alerts[0]["text"])
+
+    def test_invite_admin_command_delivers_created_code_without_nameerror(self):
+        generated_code = "Z" * 32  # Distinct from the fixture invitation inserted in setUp.
+        with (
+            patch.object(coadmin, "generate_invite_code", return_value=generated_code),
+            patch.object(coadmin, "miniapp_invite_url", return_value=None),
+        ):
+            handled = coadmin.handle(
+                "fixture-token", OWNER,
+                {"message": {
+                    "from": {"id": OWNER, "username": "owner"},
+                    "chat": {"id": OWNER, "type": "private"},
+                    "date": NOW, "text": "/invite_admin",
+                }},
+                self.request,
+            )
+        self.assertTrue(handled)
+        sent = [
+            p for method, p in self.calls
+            if method == "sendMessage" and p["chat_id"] == OWNER
+        ]
+        self.assertEqual(len(sent), 1)
+        self.assertIn(generated_code, sent[0]["text"])
+        row = self.db.execute(
+            "SELECT hash,expires FROM invitations ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        self.assertEqual(row[0], hashlib.sha256(generated_code.encode()).hexdigest())
+        self.assertEqual(row[1], NOW + coadmin.TTL)
 
     def test_miniapp_uses_same_single_use_invite_and_owner_approval(self):
         locator = coadmin.miniapp_invite_start_param(
