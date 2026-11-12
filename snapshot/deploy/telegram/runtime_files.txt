@@ -1,0 +1,19 @@
+# Exactly the Telegram bot modules shipped into /opt/browser-vps-telegram-bot/current.
+backup_catalog_menu.py
+bot.py
+coadmin.py
+coadmin_pg_connection.py
+mcp_consent_bot_bridge.py
+mcp_monitor.py
+mcp_monitor_shared.py
+postgresql_backup_ipc.py
+postgresql_backup_owner.py
+ssh_integrations_status.py
+ssh_integrations_telegram_view.py
+status.py
+status_export.py
+task_session_menu.py
+telegram_clear.py
+webapp_init_data.py
+telegram_photo_probe.py
+telegram_state_store.py
