@@ -4,8 +4,9 @@
 
 This module is a deterministic **pre-check**, not an authenticator or an
 authorization engine. It accepts only structured results produced by the
-trusted WebAuthn backend. It does not accept raw authenticator responses,
-credential material, private keys, passwords, tokens, or biometric data. It
+trusted WebAuthn backend. It accepts a strict allowlisted input shape and rejects unknown fields. It
+does not accept raw authenticator responses, credential material, private
+keys, passwords, tokens, or biometric data. It
 does not perform cryptographic signature or attestation verification.
 
 `ALLOW_FOR_BACKEND_VALIDATION` means only that the declared preconditions were
@@ -47,7 +48,8 @@ Missing, false, or unknown registry facts return `BLOCK` (fail-closed).
 | `UNKNOWN` | Input or operation cannot be classified |
 
 Missing/ambiguous challenge, credential, or WebAuthn facts never produce an
-allow outcome. The engine returns stable reason codes for audit and tests.
+allow outcome. The engine returns stable reason codes for audit and tests. Extra top-level or
+ceremony-inappropriate fields are rejected, rather than silently ignored.
 
 ## Run tests
 

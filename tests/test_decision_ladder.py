@@ -95,13 +95,25 @@ class DecisionLadderTests(unittest.TestCase):
         self.assertEqual(evaluate(data)["decision"], "BLOCK")
 
     def test_backup_restore_needs_review(self):
-        data = valid_login()
-        data["operation"] = "backup_restore"
+        data = {
+            "operation": "backup_restore",
+            "revocation_registry": {
+                "available": True,
+                "integrity_verified": True,
+                "reconciled": True,
+            },
+        }
         self.assertEqual(evaluate(data)["decision"], "NEEDS_REVIEW")
 
     def test_revocation_needs_backend_confirmation(self):
-        data = valid_login()
-        data["operation"] = "revoke"
+        data = {
+            "operation": "revoke",
+            "revocation_registry": {
+                "available": True,
+                "integrity_verified": True,
+                "reconciled": True,
+            },
+        }
         self.assertEqual(evaluate(data)["decision"], "NEEDS_REVIEW")
 
     def test_missing_credential_status_needs_review(self):
@@ -178,7 +190,21 @@ class DecisionLadderTests(unittest.TestCase):
 
     def test_nested_secret_field_is_rejected(self):
         data = valid_login()
-        data["metadata"] = {"nested": [{"access_token": "x"}]}
+        data["webauthn"]["access_token"] = "x"
+        result = evaluate(data)
+        self.assertEqual(result["decision"], "BLOCK")
+        self.assertIn("FORBIDDEN_SENSITIVE_INPUT_FIELD", result["reason_codes"])
+
+    def test_unexpected_top_level_field_is_rejected(self):
+        data = valid_login()
+        data["metadata"] = {"note": "not part of the contract"}
+        result = evaluate(data)
+        self.assertEqual(result["decision"], "BLOCK")
+        self.assertIn("UNEXPECTED_INPUT_FIELD", result["reason_codes"])
+
+    def test_wrong_ceremony_fields_are_rejected(self):
+        data = valid_login()
+        data["webauthn"]["attestation_valid"] = True
         self.assertEqual(evaluate(data)["decision"], "BLOCK")
 
     def test_input_is_not_mutated(self):

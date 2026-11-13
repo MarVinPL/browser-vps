@@ -35,18 +35,39 @@ _FORBIDDEN_KEY_PARTS = (
 )
 
 
-def _contains_forbidden_material(value: Any) -> bool:
-    """Reject input objects with field names reserved for sensitive material."""
-    if isinstance(value, dict):
-        for key, child in value.items():
-            normalized = str(key).lower().replace("-", "_")
-            if any(part in normalized for part in _FORBIDDEN_KEY_PARTS):
-                return True
-            if _contains_forbidden_material(child):
-                return True
-    elif isinstance(value, (list, tuple)):
-        return any(_contains_forbidden_material(item) for item in value)
-    return False
+def _field_error(field: Any) -> str:
+    normalized = str(field).lower().replace("-", "_")
+    if any(part in normalized for part in _FORBIDDEN_KEY_PARTS):
+        return "FORBIDDEN_SENSITIVE_INPUT_FIELD"
+    return "UNEXPECTED_INPUT_FIELD"
+
+
+def _validate_input_shape(payload: dict[str, Any], operation: str) -> dict[str, Any] | None:
+    """Enforce an allowlisted schema so raw material cannot hide in extra fields."""
+    allowed_top = {"operation", "revocation_registry"}
+    nested_allowed: dict[str, set[str]] = {
+        "revocation_registry": {"available", "integrity_verified", "reconciled"},
+    }
+    if operation in {"login", "registration"}:
+        allowed_top.update({"challenge", "webauthn"})
+        nested_allowed["challenge"] = {"valid", "unused"}
+        nested_allowed["webauthn"] = set(
+            _LOGIN_CHECKS if operation == "login" else _REGISTRATION_CHECKS
+        )
+    if operation == "login":
+        allowed_top.add("credential")
+        nested_allowed["credential"] = {"status"}
+
+    for field in payload:
+        if field not in allowed_top:
+            return _result("BLOCK", _field_error(field))
+    for container, allowed_fields in nested_allowed.items():
+        value = payload.get(container)
+        if isinstance(value, dict):
+            for field in value:
+                if field not in allowed_fields:
+                    return _result("BLOCK", _field_error(field))
+    return None
 
 
 def _result(decision: str, *reasons: str) -> dict[str, Any]:
@@ -113,12 +134,13 @@ def evaluate(payload: Any) -> dict[str, Any]:
     """
     if not isinstance(payload, dict):
         return _result("UNKNOWN", "INPUT_NOT_OBJECT")
-    if _contains_forbidden_material(payload):
-        return _result("BLOCK", "FORBIDDEN_SENSITIVE_INPUT_FIELD")
-
     operation = payload.get("operation")
     if not isinstance(operation, str) or operation not in _ALLOWED_OPERATIONS:
         return _result("UNKNOWN", "UNSUPPORTED_OR_MISSING_OPERATION")
+
+    shape_error = _validate_input_shape(payload, operation)
+    if shape_error is not None:
+        return shape_error
 
     registry_error = _check_registry(payload)
     if registry_error is not None:
